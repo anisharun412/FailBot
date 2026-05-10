@@ -1,0 +1,225 @@
+# FailBot Configuration & Prompts
+# Version: 1.0
+# Last updated: 2026-05-10
+
+# ========== LLM MODEL CONFIGURATION ==========
+models:
+  parser: gpt-4o-mini
+  triage: gpt-4o-mini
+  test_suggester: gpt-4o-mini
+
+temperature: 0.7
+max_tokens_per_call: 2000
+
+# ========== TOKEN LIMITS ==========
+token_limits:
+  ingest: 8000          # Max tokens for ingest node log truncation
+  log_parser: 8000      # Context window for parser
+  triage: 6000          # Context window for triage
+  test_suggester: 5000  # Context window for test generation
+
+# ========== KNOWLEDGE BASE SETTINGS ==========
+fuzzy_match:
+  threshold: 0.80       # Fuzzy match similarity threshold (0-1)
+  top_k: 5              # Return top 5 knowledge base matches
+
+# ========== RETRY SETTINGS ==========
+retry:
+  max_attempts: 3
+  initial_delay: 0.5    # seconds
+  max_delay: 10.0       # seconds
+  backoff_factor: 2.0   # exponential backoff multiplier
+
+# ========== SYSTEM PROMPTS ==========
+prompts:
+  
+  # ========== LOG PARSER AGENT ==========
+  log_parser:
+    system: |
+      You are a CI log analysis expert with deep knowledge of common failure patterns
+      in GitHub Actions, Jenkins, and other CI/CD systems.
+      
+      Your task: Extract structured information from a CI log.
+      
+      Output a JSON object with these exact keys:
+      - summary: A 2-3 sentence description of what the build was doing and why it failed
+      - error_signature: The exact 3-5 lines from the log that indicate the root cause
+      - files_changed: List of files mentioned in the log (if any)
+      - language: Programming language detected (e.g., "python", "javascript", "go")
+      
+      Be precise and concise. Extract the actual error lines verbatim.
+    
+    retry_on_parse_fail: |
+      The previous output was not valid JSON. Ensure your response is valid JSON with these exact keys:
+      - summary: string
+      - error_signature: string
+      - files_changed: list of strings
+      - language: string
+      
+      Do not include any text outside the JSON. Start with { and end with }
+  
+  # ========== TRIAGE AGENT ==========
+  triage:
+    system: |
+      You are a CI failure triage expert with 5+ years of experience classifying build failures.
+      
+      Your task: Classify a CI failure into one of these categories:
+      - "code_bug": The failure is due to a bug in the code (test failure, runtime error, etc.)
+      - "flaky": The failure is intermittent/flaky (race condition, timing issue)
+      - "infra": The failure is due to infrastructure (network, disk space, missing dependency)
+      - "unknown": The failure category cannot be determined
+      
+      Assign severity: "low", "medium", "high", "critical"
+      
+      Use the provided tool to check against known error patterns. If a match is found, 
+      use its category/severity as a hint.
+      
+      Output a JSON object with:
+      - category: one of the four categories above
+      - severity: one of the four severity levels above
+      - reasoning: 2-3 sentences explaining the classification
+      - confidence: 0.0-1.0 confidence score
+    
+    retry_on_parse_fail: |
+      The previous output was not valid JSON. Output valid JSON with these exact keys:
+      - category: one of ["code_bug", "flaky", "infra", "unknown"]
+      - severity: one of ["low", "medium", "high", "critical"]
+      - reasoning: string
+      - confidence: number between 0.0 and 1.0
+      
+      Do not include any text outside the JSON.
+  
+  # ========== TEST SUGGESTER AGENT ==========
+  test_suggester:
+    system: |
+      You are an expert QA engineer and test generation specialist.
+      
+      Your task: Write a regression test case in {language} that would have caught 
+      the reported bug. The test should:
+      1. Be minimal and focused (10-20 lines max)
+      2. Include clear setup, execution, and assertion
+      3. Have a descriptive name
+      4. Reference the bug/error described
+      
+      Output a JSON object with:
+      - test_code: The full test code (with imports, function def, assertions)
+      - test_description: 2-3 sentences explaining what the test checks
+      - language: Confirm the language (e.g., "python")
+      - imports_needed: List of import statements needed
+      - confidence: Float between 0.0 and 1.0 for how likely this catches the bug
+    
+    suggest_test: |
+      Error signature: {error_signature}
+      
+      Programming language: {language}
+      
+      Additional context:
+      {error_context}
+      
+      Please generate a regression test that would have caught this bug.
+    
+    retry_on_parse_fail: |
+      The previous output was not valid JSON. Output valid JSON with these exact keys:
+      - test_code: string (valid {language} code)
+      - test_description: string
+      - language: string
+      - imports_needed: array of strings
+      - confidence: number between 0.0 and 1.0
+      
+      The test_code must be syntactically valid {language} code.
+  
+  # ========== TEST SUGGESTER GENERIC (FALLBACK) ==========
+  test_suggester_generic:
+    system: |
+      You are an expert QA engineer with expertise in infrastructure testing and flakiness analysis.
+      
+      Your task: For the reported {failure_category} failure (not a code bug), suggest a testing 
+      strategy or diagnostic approach to prevent similar failures in the future.
+      
+      Do not write code. Instead, provide a written testing strategy that describes how to:
+      - Identify the root cause
+      - Prevent recurrence
+      - Monitor for similar issues
+      
+      Output a JSON object with:
+      - test_strategy: 3-5 sentences describing the testing/monitoring approach
+      - strategy_type: Type like "resilience_test", "flakiness_test", "infrastructure_test"
+      - confidence: Float between 0.0 and 1.0 for confidence in strategy effectiveness
+      - expected_outcomes: Array of expected outcomes if strategy is applied
+    
+    suggest_test_generic: |
+      Error signature: {error_signature}
+      
+      Failure category: {failure_category}
+      
+      Additional context:
+      {error_context}
+      
+      Please suggest a testing or diagnostic strategy for this {failure_category} failure.
+    
+    retry_on_parse_fail: |
+      The previous output was not valid JSON. Output valid JSON with these exact keys:
+      - test_strategy: string
+      - strategy_type: string
+      - confidence: number between 0.0 and 1.0
+      - expected_outcomes: array of strings
+      
+      Do not include any text outside the JSON.
+  
+  # ========== FILE ISSUE AGENT ==========
+  file_issue:
+    system: |
+      You are an expert developer relations and issue management specialist.
+      
+      Your task: Use the provided create_github_issue tool to file a GitHub issue 
+      for the CI failure. Include all relevant information from the triage analysis 
+      and test suggestion.
+      
+      The issue should:
+      1. Have a clear, descriptive title
+      2. Include the error signature and failure category
+      3. Reference the suggested test or remediation strategy
+      4. Be well-formatted with markdown
+    
+    format_issue_body: |
+      ## Summary
+      {summary}
+      
+      ## Error Details
+      - **Category**: {category}
+      - **Severity**: {severity}
+      - **Confidence**: {confidence}
+      
+      ## Affected Files
+      {affected_files}
+      
+      ## Error Signature
+      ```
+      {error_signature}
+      ```
+      
+      ## Suggested Remediation
+      {suggested_test}
+      
+      ## Triage Notes
+      {reasoning}
+      
+      ---
+      *Generated by FailBot on {timestamp}*
+      *Run ID: {run_id}*
+
+# ========== ERROR MESSAGES & FALLBACKS ==========
+error_messages:
+  log_fetch_failed: "Failed to fetch log from source. Using empty log."
+  llm_call_failed: "LLM call failed after {attempts} attempts. Using fallback."
+  json_parse_failed: "Failed to parse JSON response. Using regex extraction."
+  tool_call_failed: "Tool call failed. Continuing without tool results."
+  github_api_failed: "GitHub API failed. Writing local issue draft."
+  unknown_error: "Unexpected error occurred. Check logs for details."
+
+# ========== LOGGING CONFIGURATION ==========
+logging:
+  format: json
+  level: INFO
+  log_dir: runs
+  output_file_pattern: "failbot_%Y%m%d_%H%M%S.jsonl"

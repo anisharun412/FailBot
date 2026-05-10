@@ -1,0 +1,1 @@
+"""FailBot callbacks package."""

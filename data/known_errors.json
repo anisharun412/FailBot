@@ -1,0 +1,68 @@
+{
+  "patterns": [
+    {
+      "id": "py_type_error_001",
+      "signature": "TypeError: unsupported operand type(s)",
+      "category": "code_bug",
+      "severity": "high",
+      "description": "Type mismatch in operation (e.g., adding int and str)",
+      "common_causes": ["Type mismatch", "Missing type conversion"]
+    },
+    {
+      "id": "py_attr_error_001",
+      "signature": "AttributeError: 'NoneType' object has no attribute",
+      "category": "code_bug",
+      "severity": "high",
+      "description": "Accessing attribute on None object",
+      "common_causes": ["Null pointer", "Missing initialization"]
+    },
+    {
+      "id": "py_import_error_001",
+      "signature": "ModuleNotFoundError: No module named",
+      "category": "infra",
+      "severity": "medium",
+      "description": "Missing dependency or wrong import path",
+      "common_causes": ["Missing package", "Wrong version", "Path issue"]
+    },
+    {
+      "id": "test_timeout_001",
+      "signature": "TimeoutError: test execution exceeded",
+      "category": "flaky",
+      "severity": "medium",
+      "description": "Test took too long to execute (timeout)",
+      "common_causes": ["Slow CI infrastructure", "Race condition"]
+    },
+    {
+      "id": "network_error_001",
+      "signature": "ConnectionError: Failed to establish connection",
+      "category": "infra",
+      "severity": "medium",
+      "description": "Network connectivity issue",
+      "common_causes": ["Network outage", "Firewall", "DNS"]
+    },
+    {
+      "id": "disk_error_001",
+      "signature": "OSError: No space left on device",
+      "category": "infra",
+      "severity": "critical",
+      "description": "Disk space exhausted",
+      "common_causes": ["Build artifacts not cleaned", "Log files"]
+    },
+    {
+      "id": "auth_error_001",
+      "signature": "PermissionError: Access denied",
+      "category": "infra",
+      "severity": "high",
+      "description": "Missing permissions or credentials",
+      "common_causes": ["Missing API key", "Role permissions"]
+    },
+    {
+      "id": "assertion_error_001",
+      "signature": "AssertionError: assert",
+      "category": "code_bug",
+      "severity": "high",
+      "description": "Test assertion failed",
+      "common_causes": ["Logic error", "Missing data"]
+    }
+  ]
+}
