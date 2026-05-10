@@ -1,0 +1,17 @@
+{
+  "ci_failure_001.txt": {
+    "expected_category": "code_bug",
+    "expected_severity": "high",
+    "expected_test_keywords": ["assert", "TypeError", "NoneType", "login"]
+  },
+  "ci_failure_002.txt": {
+    "expected_category": "flaky",
+    "expected_severity": "medium",
+    "expected_test_keywords": ["timeout", "retry", "race"]
+  },
+  "ci_failure_003.txt": {
+    "expected_category": "infra",
+    "expected_severity": "high",
+    "expected_test_keywords": ["permission", "disk", "network"]
+  }
+}

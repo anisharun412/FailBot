@@ -3,17 +3,19 @@
 import logging
 from typing import Any, Literal, Optional
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from src.config import get_config
 from src.state import FailBotState
-from src.tools.knowledge_base import lookup_known_errors
+from src.tools.langchain_tools import get_bound_model
 from src.utils.graph_utils import handle_node_error, log_node_end, log_node_start
 from src.utils.logging_config import log_event
 from src.utils.prompt_templates import render_agent_prompt
 from src.utils.retry import async_retry
 from src.utils.token_counter import TokenCounter
+from src.utils.tool_runner import run_tool_calls
 
 
 logger = logging.getLogger(__name__)
@@ -126,16 +128,25 @@ async def call_triage_agent(
         error_context=error_context
     )
     
-    # Call LLM with structured output
-    parser = model.with_structured_output(TriageOutput)
-    response = await parser.ainvoke(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-    )
-    
-    return response
+    bound_model = get_bound_model(model)
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+    ]
+
+    first_response = await bound_model.ainvoke(messages)
+    tool_messages = await run_tool_calls(first_response)
+
+    if tool_messages:
+        tool_aware_messages = messages + [first_response] + tool_messages
+        parser = bound_model.with_structured_output(TriageOutput)
+        return await parser.ainvoke(tool_aware_messages)
+
+    try:
+        return TriageOutput.model_validate_json(first_response.content)
+    except Exception:
+        parser = bound_model.with_structured_output(TriageOutput)
+        return await parser.ainvoke(messages)
 
 
 async def triage_node(state: FailBotState) -> dict[str, Any]:
@@ -178,30 +189,6 @@ Language: {state.get('language', 'unknown')}
 Files: {', '.join(state.get('files_changed', [])[:3])}
 Log preview: {state.get('log_text', '')[:500]}
 """
-        
-        # Try to find similar known errors
-        known_errors_matches = []
-        try:
-            known_errors_matches = await lookup_known_errors(
-                state["error_signature"],
-                top_k=3
-            )
-            if known_errors_matches:
-                log_event(
-                    logger, state["run_id"], "triage",
-                    "kb_match",
-                    {
-                        "matches": len(known_errors_matches),
-                        "top_match": known_errors_matches[0].get("category"),
-                        "score": known_errors_matches[0].get("match_score")
-                    }
-                )
-                # Append KB info to context for LLM
-                error_context += f"\n\nKnown similar errors:\n"
-                for match in known_errors_matches:
-                    error_context += f"- {match.get('category')}: {match.get('description')[:60]}\n"
-        except Exception as kb_error:
-            logger.debug(f"Knowledge base lookup failed: {kb_error}")
         
         # Initialize LLM
         model = ChatOpenAI(

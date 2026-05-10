@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from src.config import get_config
@@ -13,6 +14,7 @@ from src.utils.graph_utils import handle_node_error, log_node_end, log_node_star
 from src.utils.logging_config import log_event
 from src.utils.prompt_templates import render_agent_prompt
 from src.utils.token_counter import TokenCounter
+from src.utils.tool_runner import parse_tool_message, run_tool_calls
 
 
 logger = logging.getLogger(__name__)
@@ -98,6 +100,10 @@ async def file_issue_node(state: FailBotState) -> dict[str, Any]:
     try:
         config = get_config()
         repo_name = state.get("repo_name", "unknown")
+        owner = "unknown"
+        repo = repo_name
+        if repo_name and "/" in repo_name:
+            owner, repo = repo_name.split("/", 1)
         
         log_event(
             logger, state["run_id"], "file_issue",
@@ -137,51 +143,44 @@ async def file_issue_node(state: FailBotState) -> dict[str, Any]:
         
         user_prompt = f"""Please file this GitHub issue:
 
-Repository: {repo_name}
-Title: {title}
+    Repository: {owner}/{repo}
+    Title: {title}
 
-Body:
-{body}
+    Body:
+    {body}
 
-Failure Category: {state.get('failure_category')}
-Severity: {state.get('severity')}
+    Failure Category: {state.get('failure_category')}
+    Severity: {state.get('severity')}
 
-Use the create_github_issue tool to file this issue with appropriate labels."""
+    Use the create_github_issue tool to file this issue with appropriate labels."""
         
         # Call model (it will decide whether to use tools)
-        response = await bound_model.ainvoke(
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-        )
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+        response = await bound_model.ainvoke(messages)
         
         # Extract result from model response
         issue_url = None
         method_used = None
         
-        # Check if model used tool_calls (newer LangChain versions)
-        if hasattr(response, 'tool_calls') and response.tool_calls:
-            for tool_call in response.tool_calls:
-                if tool_call.get('name') == 'create_github_issue':
-                    # Tool was called - result is in tool output
-                    from src.tools.langchain_tools import create_github_issue as create_issue_tool
-                    
-                    tool_args = tool_call.get('args', {})
-                    result = await create_issue_tool.ainvoke(tool_args)
-                    
-                    if result.get("success"):
-                        issue_url = result.get("issue_url")
-                        method_used = result.get("method")
-                        
-                        log_event(
-                            logger, state["run_id"], "file_issue",
-                            "issue_filed_via_tool",
-                            {
-                                "url": issue_url[:80],
-                                "method": method_used
-                            }
-                        )
+        tool_messages = await run_tool_calls(response)
+        for tool_message in tool_messages:
+            if tool_message.name == "create_github_issue":
+                result = parse_tool_message(tool_message)
+                if result.get("success"):
+                    issue_url = result.get("issue_url")
+                    method_used = result.get("method")
+
+                    log_event(
+                        logger, state["run_id"], "file_issue",
+                        "issue_filed_via_tool",
+                        {
+                            "url": issue_url[:80],
+                            "method": method_used
+                        }
+                    )
         
         # Fallback: If no tool was called, use direct tool invocation
         if not issue_url:
@@ -191,7 +190,8 @@ Use the create_github_issue tool to file this issue with appropriate labels."""
             result = await create_issue_tool.ainvoke({
                 "title": title,
                 "body": body,
-                "repo": repo_name,
+                "owner": owner,
+                "repo": repo,
                 "labels": ["failbot", state.get("failure_category", "unknown")]
             })
             

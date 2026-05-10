@@ -10,9 +10,9 @@ import logging
 import os
 from typing import Optional
 
+from src.config import get_config
 from src.tools.code_validator import CodeValidator
 from src.tools.knowledge_base import get_knowledge_base
-from src.tools.github_client import GitHubRESTClient
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +95,11 @@ def lookup_error_patterns(error_signature: str, top_k: int = 3) -> dict:
         - matches: List of matching error patterns with details
         - best_match: The highest scoring match if any
     """
+    config = get_config()
+    threshold = config.fuzzy_match.get("threshold", 0.80)
+
     kb = get_knowledge_base()
-    matches = kb.lookup(error_signature, top_k=top_k, threshold=0.80)
+    matches = kb.lookup(error_signature, top_k=top_k, threshold=threshold)
     
     best_match = None
     if matches:
@@ -110,7 +113,7 @@ def lookup_error_patterns(error_signature: str, top_k: int = 3) -> dict:
 
 
 @tool
-def create_github_issue(
+async def create_github_issue(
     title: str,
     body: str,
     owner: str = "unknown",
@@ -139,24 +142,37 @@ def create_github_issue(
     """
     if labels is None:
         labels = ["failbot"]
+
+    if owner == "unknown" and repo and "/" in repo:
+        owner, repo = repo.split("/", 1)
     
     github_token = os.getenv("GITHUB_TOKEN")
     
     try:
-        # Try GitHub API first
-        client = GitHubRESTClient(token=github_token)
-        issue_url = client.create_issue(
-            owner=owner,
-            repo=repo,
-            title=title,
-            body=body,
-            labels=labels
-        )
-        
+        from src.tools.github_client import GitHubClient
+
+        use_mcp_env = os.getenv("FAILBOT_USE_MCP", "true").strip().lower()
+        use_mcp = use_mcp_env in {"1", "true", "yes", "on"}
+        client = GitHubClient(token=github_token, use_mcp=use_mcp)
+
+        try:
+            issue_url, method = await client.create_issue(
+                owner=owner,
+                repo=repo,
+                title=title,
+                body=body,
+                labels=labels
+            )
+        finally:
+            await client.aclose()
+
+        if not issue_url:
+            raise RuntimeError("GitHub issue creation failed")
+
         return {
             "success": True,
             "issue_url": issue_url,
-            "method": "github_api",
+            "method": method or "github_api",
             "error": None
         }
     

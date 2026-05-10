@@ -5,9 +5,9 @@ A LangGraph-based multi-agent system that automatically triages CI failures, gen
 ## Features
 
 - **Multi-Agent Pipeline**: LogParserAgent → TriageAgent → TestSuggesterAgent → IssueFilingAgent
-- **Structured Logging**: Full JSON-line logging with token tracking and latency metrics
-- **Graceful Degradation**: MCP → GitHub REST API → Local file fallback
-- **Evaluation Framework**: Built-in eval harness with triage accuracy metrics
+- **Tool Binding (LangGraph-native)**: Tools are bound to LLMs with `@tool` + ToolNode execution
+- **MCP GitHub Support**: Optional MCP server → REST API → Local file fallback
+- **Structured Logging**: JSON-line logging with token tracking and latency metrics
 - **Production-Ready**: Error recovery, retry logic, comprehensive documentation
 
 ## Quick Start
@@ -36,6 +36,11 @@ cp .env.example .env
 # Edit .env with your API keys
 export OPENAI_API_KEY=sk-...
 export GITHUB_TOKEN=ghp_...
+
+# Optional MCP GitHub integration
+export FAILBOT_USE_MCP=true
+export MCP_GITHUB_SERVER_CMD="npx -y @modelcontextprotocol/server-github"
+export MCP_GITHUB_TOOL_CREATE_ISSUE=create_issue
 ```
 
 ### 3. Run
@@ -60,10 +65,10 @@ Input Log
 [Triage Agent] → Classify: code_bug | flaky | infra | unknown
     ↓
          ├→ "code_bug" ──→ [Suggest Test] → Generate regression test
-         ├→ "flaky"    ──→ [Suggest Test Generic] → Test strategy
-         └→ "unknown"  ──→ [File Issue] → Create GitHub issue
+         ├→ "flaky"    ──→ [Suggest Test Generic] → Tool-aware strategy
+         └→ "unknown"  ──→ [File Issue] → Tool-bound issue filing
                               ↓
-[File Issue] → MCP → REST API → Local Fallback
+[File Issue] → MCP GitHub Server → REST API → Local Fallback
     ↓
 [Report] → Print summary, save results
 ```
@@ -75,7 +80,7 @@ failbot/
 ├── src/
 │   ├── nodes/          # Agent node implementations
 │   ├── tools/          # Knowledge base, validators, API clients
-│   ├── utils/          # Token counter, retry logic, logging
+│   ├── utils/          # Token counter, retry logic, logging, tool runner
 │   ├── callbacks/      # LangGraph event handlers
 │   ├── graph.py        # StateGraph builder
 │   ├── state.py        # FailBotState TypedDict
@@ -86,9 +91,10 @@ failbot/
 ├── evals/
 │   ├── test_logs/      # Sample CI log files
 │   ├── ground_truth.json
-│   └── eval.py         # Evaluation harness
-├── tests/              # Unit & integration tests
-├── docs/               # Architecture & guides
+│   ├── eval.py          # Evaluation harness
+│   └── results/        # Analysis outputs
+├── tests/              # Unit & integration tests (expand as needed)
+├── docs/               # Architecture & guides (in progress)
 └── README.md
 ```
 
@@ -101,33 +107,45 @@ Edit `config/prompts.yaml` to customize:
 - **System Prompts**: Agent instructions (few-shot examples, style)
 - **Retry Strategy**: Backoff parameters for resilience
 
-## Evaluation
+## Metrics & Analysis
 
-Run the evaluation harness to measure agent quality:
+FailBot captures structured events in `runs/failbot_*.jsonl`. Use the metrics CLI:
 
 ```bash
-python -m evals.eval --output evals/results/
+python -m src.metrics analyze
+python -m src.metrics list
+python -m src.metrics compare --logs runs/failbot_*.jsonl
 ```
 
-This generates:
-- `eval_results.csv` — Per-log metrics (accuracy, latency, token usage)
-- `eval_report.html` — Interactive dashboard with charts
+## Evaluation Harness
+
+Run evals with the bundled sample logs:
+
+```bash
+python -m evals.eval --repo owner/repo
+```
+
+Inputs live in `evals/test_logs/` and expected outputs in `evals/ground_truth.json`.
+Results are written to `evals/results/` (CSV, JSON summary, and HTML report).
 
 ## Documentation
 
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — System design & data flow
-- [FAILURE_MODES.md](docs/FAILURE_MODES.md) — Error handling & recovery
-- [EVAL_WORKFLOW.md](docs/EVAL_WORKFLOW.md) — How to curate eval data
-- [API.md](docs/API.md) — Function signatures & node specs
+- [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md) — Code practice consistency details
+- [TOOL_BINDING_REFACTORING.md](TOOL_BINDING_REFACTORING.md) — Tool binding architecture
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — System design overview
+- [docs/FAILURE_MODES.md](docs/FAILURE_MODES.md) — Failure handling guide
+- [docs/EVAL_WORKFLOW.md](docs/EVAL_WORKFLOW.md) — Evaluation workflow
+- [docs/API.md](docs/API.md) — CLI and API reference
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Deployment notes
 
 ## Development
 
 ### Running Tests
 
 ```bash
-pytest tests/  # All tests
-pytest tests/test_parse_log.py  # Specific test
-pytest tests/ -v --cov  # With coverage
+python test_code_consistency.py
+python test_tool_binding.py
+python test_phase5.py
 ```
 
 ### Code Quality
@@ -175,6 +193,11 @@ Typical pipeline execution:
 - Verify `GITHUB_TOKEN` has `repo` and `issues` permissions
 - Check repo exists and token has access
 - Issue will be saved locally to `runs/*_issue_draft.md`
+
+### MCP GitHub Issues
+- Ensure Node.js is installed
+- Set `MCP_GITHUB_SERVER_CMD` (default uses `npx -y @modelcontextprotocol/server-github`)
+- Toggle MCP via `FAILBOT_USE_MCP=true|false`
 
 ### Config Not Loading
 - Set `export FAILBOT_CONFIG=/path/to/config/prompts.yaml`

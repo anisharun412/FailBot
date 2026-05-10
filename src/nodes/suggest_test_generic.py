@@ -3,17 +3,19 @@
 import logging
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from src.config import get_config
 from src.state import FailBotState
-from src.tools.langchain_tools import FAILBOT_TOOLS, get_bound_model
+from src.tools.langchain_tools import get_bound_model
 from src.utils.graph_utils import handle_node_error, log_node_end, log_node_start
 from src.utils.logging_config import log_event
 from src.utils.prompt_templates import render_agent_prompt
 from src.utils.retry import async_retry
 from src.utils.token_counter import TokenCounter
+from src.utils.tool_runner import run_tool_calls
 
 
 logger = logging.getLogger(__name__)
@@ -65,10 +67,7 @@ async def call_test_strategy_agent(
     Raises:
         Exception: If LLM call fails
     """
-    # Bind tools to model for agent usage
     bound_model = get_bound_model(model)
-    parser = bound_model.with_structured_output(TestStrategyOutput)
-    
     system_prompt = render_agent_prompt(
         "test_suggester_generic", "system",
         failure_category=failure_category
@@ -79,16 +78,25 @@ async def call_test_strategy_agent(
         failure_category=failure_category,
         error_context=error_context
     )
-    
-    # Call LLM with tools bound (agent can decide to use them)
-    response = await parser.ainvoke(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-    )
-    
-    return response
+
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+    ]
+
+    first_response = await bound_model.ainvoke(messages)
+    tool_messages = await run_tool_calls(first_response)
+
+    if tool_messages:
+        tool_aware_messages = messages + [first_response] + tool_messages
+        parser = bound_model.with_structured_output(TestStrategyOutput)
+        return await parser.ainvoke(tool_aware_messages)
+
+    try:
+        return TestStrategyOutput.model_validate_json(first_response.content)
+    except Exception:
+        parser = bound_model.with_structured_output(TestStrategyOutput)
+        return await parser.ainvoke(messages)
 
 
 async def suggest_test_generic_node(state: FailBotState) -> dict[str, Any]:

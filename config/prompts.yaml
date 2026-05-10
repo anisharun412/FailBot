@@ -71,7 +71,7 @@ prompts:
       
       Assign severity: "low", "medium", "high", "critical"
       
-      Use the provided tool to check against known error patterns. If a match is found, 
+      Use the lookup_error_patterns tool to check against known error patterns. If a match is found,
       use its category/severity as a hint.
       
       Output a JSON object with:
@@ -136,6 +136,8 @@ prompts:
       Your task: For the reported {failure_category} failure (not a code bug), suggest a testing 
       strategy or diagnostic approach to prevent similar failures in the future.
       
+      You may call the lookup_error_patterns tool to check for known issues.
+
       Do not write code. Instead, provide a written testing strategy that describes how to:
       - Identify the root cause
       - Prevent recurrence

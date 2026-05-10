@@ -1,11 +1,11 @@
 """GitHub client: MCP server and REST API integration."""
 
+import asyncio
 import json
 import logging
 import os
-import subprocess
-import time
-from pathlib import Path
+import re
+import shlex
 from typing import Optional
 
 import httpx
@@ -18,57 +18,73 @@ logger = logging.getLogger(__name__)
 
 class MCPGitHubServer:
     """Manages MCP (Model Context Protocol) GitHub server subprocess."""
-    
-    def __init__(self, port: int = 3000, timeout: int = 10):
+
+    def __init__(self, command: Optional[str] = None, timeout: int = 10):
         """
         Initialize MCP server manager.
-        
+
         Args:
-            port: Port to run MCP server on
+            command: Command to start MCP GitHub server
             timeout: Timeout for server startup in seconds
         """
-        self.port = port
+        self.command = command or os.getenv(
+            "MCP_GITHUB_SERVER_CMD",
+            "npx -y @modelcontextprotocol/server-github"
+        )
         self.timeout = timeout
-        self.process = None
-        self.base_url = f"http://localhost:{port}"
-    
-    def start(self) -> bool:
+        self.process: Optional[asyncio.subprocess.Process] = None
+        self.reader: Optional[asyncio.StreamReader] = None
+        self.writer: Optional[asyncio.StreamWriter] = None
+        self._stderr_task: Optional[asyncio.Task] = None
+        self._next_id = 1
+
+    async def start(self) -> bool:
         """
         Start the MCP GitHub server subprocess.
-        
+
         Returns:
             True if server started successfully
         """
         if self.process is not None:
             logger.debug("MCP server already running")
             return True
-        
+
         try:
-            # Try to start MCP server
-            # Note: Actual MCP server implementation would need to be available
-            logger.debug(f"Starting MCP GitHub server on port {self.port}...")
-            
-            # This is a placeholder - real implementation would start the MCP server
-            # For now, we simulate server startup
-            self.process = None  # Would be actual subprocess
-            
-            # Wait for server to be ready
-            time.sleep(0.5)
-            
-            logger.info(f"MCP server started on {self.base_url}")
+            args = shlex.split(self.command)
+            if not args:
+                raise ValueError("MCP_GITHUB_SERVER_CMD is empty")
+
+            env = os.environ.copy()
+            self.process = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+
+            self.reader = self.process.stdout
+            self.writer = self.process.stdin
+            self._stderr_task = asyncio.create_task(self._drain_stderr())
+
+            await asyncio.wait_for(self._initialize(), timeout=self.timeout)
+            logger.info("MCP GitHub server initialized")
             return True
-            
         except Exception as e:
             logger.error(f"Failed to start MCP server: {e}")
-            self.process = None
+            await self.stop()
             return False
-    
-    def stop(self):
+
+    async def stop(self) -> None:
         """Stop the MCP GitHub server subprocess."""
+        if self._stderr_task:
+            self._stderr_task.cancel()
+            self._stderr_task = None
+
         if self.process is not None:
             try:
                 self.process.terminate()
-                self.process.wait(timeout=5)
+                await asyncio.wait_for(self.process.wait(), timeout=5)
                 logger.debug("MCP server stopped")
             except Exception as e:
                 logger.warning(f"Error stopping MCP server: {e}")
@@ -78,7 +94,86 @@ class MCPGitHubServer:
                     pass
             finally:
                 self.process = None
-    
+                self.reader = None
+                self.writer = None
+
+    async def _drain_stderr(self) -> None:
+        if not self.process or not self.process.stderr:
+            return
+
+        while True:
+            line = await self.process.stderr.readline()
+            if not line:
+                break
+            logger.debug("MCP stderr: %s", line.decode(errors="ignore").rstrip())
+
+    async def _send_message(self, payload: dict) -> None:
+        if not self.writer:
+            raise RuntimeError("MCP server not initialized")
+
+        body = json.dumps(payload)
+        header = f"Content-Length: {len(body.encode('utf-8'))}\r\n\r\n"
+        self.writer.write(header.encode("utf-8") + body.encode("utf-8"))
+        await self.writer.drain()
+
+    async def _read_message(self) -> dict:
+        if not self.reader:
+            raise RuntimeError("MCP server not initialized")
+
+        headers = {}
+        while True:
+            line = await self.reader.readline()
+            if not line:
+                raise RuntimeError("MCP server closed connection")
+            if line in (b"\r\n", b"\n"):
+                break
+            key, _, value = line.decode("utf-8").partition(":")
+            headers[key.lower()] = value.strip()
+
+        content_length = int(headers.get("content-length", "0"))
+        if content_length <= 0:
+            raise RuntimeError("Invalid MCP message framing")
+
+        body = await self.reader.readexactly(content_length)
+        return json.loads(body.decode("utf-8"))
+
+    async def _request(self, method: str, params: dict) -> dict:
+        request_id = self._next_id
+        self._next_id += 1
+
+        await self._send_message({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": method,
+            "params": params,
+        })
+
+        while True:
+            response = await self._read_message()
+            if response.get("id") != request_id:
+                continue
+            if "error" in response:
+                raise RuntimeError(response["error"])
+            return response
+
+    async def _notify(self, method: str, params: dict) -> None:
+        await self._send_message({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        })
+
+    async def _initialize(self) -> None:
+        await self._request(
+            "initialize",
+            {
+                "protocolVersion": os.getenv("MCP_PROTOCOL_VERSION", "2024-11-05"),
+                "capabilities": {},
+                "clientInfo": {"name": "failbot", "version": "1.0"},
+            },
+        )
+        await self._notify("initialized", {})
+
     async def create_issue(
         self,
         owner: str,
@@ -89,50 +184,69 @@ class MCPGitHubServer:
     ) -> Optional[str]:
         """
         Create a GitHub issue via MCP server.
-        
+
         Args:
             owner: Repository owner
             repo: Repository name
             title: Issue title
             body: Issue body
             labels: Optional issue labels
-            
+
         Returns:
             Issue URL if successful, None otherwise
-            
+
         Raises:
             Exception: If MCP request fails
         """
         if not self.process:
             raise RuntimeError("MCP server not running")
-        
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "gh.createIssue",
-            "params": {
-                "owner": owner,
-                "repo": repo,
-                "title": title,
-                "body": body,
-                "labels": labels or []
+
+        tool_name = os.getenv("MCP_GITHUB_TOOL_CREATE_ISSUE", "create_issue")
+        response = await self._request(
+            "tools/call",
+            {
+                "name": tool_name,
+                "arguments": {
+                    "owner": owner,
+                    "repo": repo,
+                    "title": title,
+                    "body": body,
+                    "labels": labels or [],
+                },
             },
-            "id": int(time.time() * 1000)
-        }
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.base_url}/rpc",
-                json=payload
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            
-            if "error" in result:
-                raise Exception(f"MCP error: {result['error']}")
-            
-            issue_url = result.get("result", {}).get("html_url")
-            return issue_url
+        )
+
+        return _extract_issue_url(response.get("result"))
+
+    def __del__(self) -> None:
+        if self.process is not None:
+            try:
+                self.process.terminate()
+            except Exception:
+                pass
+
+
+def _extract_issue_url(result: Optional[dict]) -> Optional[str]:
+    if not result:
+        return None
+    if isinstance(result, dict):
+        for key in ("issue_url", "html_url", "url"):
+            value = result.get(key)
+            if isinstance(value, str) and "github.com" in value:
+                return value
+
+        content = result.get("content")
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text") or item.get("content")
+                else:
+                    text = item
+                if isinstance(text, str):
+                    match = re.search(r"https://github.com/\S+", text)
+                    if match:
+                        return match.group(0)
+    return None
 
 
 class GitHubRESTClient:
@@ -289,7 +403,7 @@ class GitHubClient:
         # Try MCP server first
         if self.use_mcp and self.mcp_server:
             try:
-                if self.mcp_server.start():
+                if await self.mcp_server.start():
                     issue_url = await self.mcp_server.create_issue(
                         owner, repo, title, body, labels
                     )
@@ -298,7 +412,7 @@ class GitHubClient:
                         return (issue_url, "mcp")
             except Exception as e:
                 logger.warning(f"MCP issue creation failed: {e}")
-                self.mcp_server.stop()
+                await self.mcp_server.stop()
         
         # Fallback to REST API
         try:
@@ -311,10 +425,17 @@ class GitHubClient:
             logger.error(f"REST API issue creation failed: {e}")
             return (None, None)
     
-    def __del__(self):
-        """Cleanup MCP server on deletion."""
+    async def aclose(self) -> None:
+        """Cleanup MCP server when finished."""
         if self.mcp_server:
-            self.mcp_server.stop()
+            await self.mcp_server.stop()
+
+    def __del__(self):
+        if self.mcp_server:
+            try:
+                self.mcp_server.process.terminate()
+            except Exception:
+                pass
 
 
 async def create_github_issue(
@@ -341,7 +462,9 @@ async def create_github_issue(
     Returns:
         Tuple of (issue_url, method_used)
     """
-    client = GitHubClient(token=token, use_mcp=False)  # MCP not ready yet
+    use_mcp_env = os.getenv("FAILBOT_USE_MCP", "true").strip().lower()
+    use_mcp = use_mcp_env in {"1", "true", "yes", "on"}
+    client = GitHubClient(token=token, use_mcp=use_mcp)
     
     try:
         issue_url, method = await client.create_issue(
@@ -355,6 +478,4 @@ async def create_github_issue(
         
         return (issue_url, method)
     finally:
-        # Cleanup
-        if client.mcp_server:
-            client.mcp_server.stop()
+        await client.aclose()

@@ -1,0 +1,5 @@
+[INFO] Build step: compile assets
+[ERROR] Permission denied: '/var/lib/build/cache'
+[ERROR] Could not write to cache directory
+
+FATAL: disk write failed due to insufficient permissions
