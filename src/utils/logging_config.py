@@ -7,6 +7,7 @@ Sets up structured JSON logging with JSONL output.
 import logging
 import logging.handlers
 import json
+import threading
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
@@ -96,7 +97,7 @@ def setup_json_logging(
     logger.handlers = []
     
     # Create file handler
-    file_handler = logging.FileHandler(log_file, mode='w')
+    file_handler = logging.FileHandler(log_file, mode='a')
     file_handler.setLevel(level)
     
     # Use custom JSON formatter
@@ -105,7 +106,7 @@ def setup_json_logging(
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     
-    # Also add console handler for INFO level
+    # Also add console handler for WARNING level
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.WARNING)  # Only show warnings/errors on console
     console_formatter = logging.Formatter(
@@ -210,6 +211,7 @@ def log_event(
 
 # Convenience function
 _default_logger: Optional[logging.Logger] = None
+_logger_lock = threading.Lock()
 
 
 def get_logger(output_dir: str = "runs", run_id: Optional[str] = None) -> logging.Logger:
@@ -226,7 +228,9 @@ def get_logger(output_dir: str = "runs", run_id: Optional[str] = None) -> loggin
     global _default_logger
     
     if _default_logger is None:
-        _default_logger = setup_json_logging(output_dir, run_id=run_id)
+        with _logger_lock:
+            if _default_logger is None:
+                _default_logger = setup_json_logging(output_dir, run_id=run_id)
     
     return _default_logger
 

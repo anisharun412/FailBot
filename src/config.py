@@ -161,11 +161,21 @@ def load_config(config_path: Optional[str] = None) -> FailBotConfig:
 
     temp_env = os.getenv("FAILBOT_TEMPERATURE") or os.getenv("TEMPERATURE")
     if temp_env is not None:
-        data["temperature"] = float(temp_env)
+        try:
+            data["temperature"] = float(temp_env)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid FAILBOT_TEMPERATURE value: {temp_env!r} (must be a number)"
+            ) from exc
 
     max_tokens_env = os.getenv("FAILBOT_MAX_TOKENS_PER_CALL") or os.getenv("MAX_TOKENS_PER_CALL")
     if max_tokens_env is not None:
-        data["max_tokens_per_call"] = int(max_tokens_env)
+        try:
+            data["max_tokens_per_call"] = int(max_tokens_env)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid FAILBOT_MAX_TOKENS_PER_CALL value: {max_tokens_env!r} (must be an integer)"
+            ) from exc
     
     # Create config object
     config = FailBotConfig(

@@ -60,7 +60,7 @@ def fallback_parse_log(log_text: str) -> ParsedLogOutput:
     language = "unknown"
     if any(pattern in log_text for pattern in ["Traceback", "File", "ImportError", "ModuleNotFoundError"]):
         language = "python"
-    elif any(pattern in log_text for pattern in ["TypeError", "ReferenceError", "SyntaxError", "at .*node_modules"]):
+    elif any(pattern in log_text for pattern in ["TypeError", "ReferenceError", "SyntaxError"]) or re.search(r"at .*node_modules", log_text):
         language = "javascript"
     elif any(pattern in log_text for pattern in ["goroutine", "panic:", "runtime error"]):
         language = "go"

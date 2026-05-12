@@ -3,6 +3,7 @@
 from __future__ import annotations
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +41,7 @@ def _yn(v) -> str:
 
 def render_eval_dashboard(eval_data: Optional[Dict[str, Any]], df: pd.DataFrame) -> None:
     st.markdown("## 🎯 Eval Dashboard")
+    EVAL_TIMEOUT_SECONDS = 1800
 
     # ── Harness Controls ──────────────────────────────────────────────────────
     with st.expander("🛠️ Run Evaluation Harness & Upload Logs", expanded=False):
@@ -57,7 +59,11 @@ def render_eval_dashboard(eval_data: Optional[Dict[str, Any]], df: pd.DataFrame)
                 logs_dir.mkdir(parents=True, exist_ok=True)
                 saved_count = 0
                 for f in uploaded_files:
-                    target_path = logs_dir / f.name
+                    safe_name = Path(f.name).name.strip().lstrip(".")
+                    if not safe_name or safe_name != f.name:
+                        st.warning(f"Skipping unsafe upload name: {f.name}")
+                        continue
+                    target_path = logs_dir / safe_name
                     with open(target_path, "wb") as out:
                         out.write(f.getvalue())
                     saved_count += 1
@@ -65,27 +71,34 @@ def render_eval_dashboard(eval_data: Optional[Dict[str, Any]], df: pd.DataFrame)
 
         with c2:
             st.markdown("#### Run Harness")
-            eval_repo = st.text_input("Repository (owner/repo)", value="owner/repo")
+            eval_repo = st.text_input("Repository (owner/repo)", value="owner/repo").strip()
+            repo_valid = bool(re.match(r"^[^\s/]+/[^\s/]+$", eval_repo))
             if st.button("Execute Eval Pipeline", type="primary"):
-                with st.spinner("Running eval harness (this may take a while)..."):
-                    try:
-                        # Run the eval script as a subprocess
-                        result = subprocess.run(
-                            [sys.executable, "-m", "evals.eval", "--repo", eval_repo],
-                            capture_output=True,
-                            text=True,
-                            check=True
-                        )
-                        st.success("Evaluation completed successfully!")
-                        with st.expander("Subprocess Output", expanded=False):
-                            st.code(result.stdout)
-                        # Clear cache so new results are loaded
-                        st.cache_data.clear()
-                        # Reload the page to reflect new eval data
-                        st.rerun()
-                    except subprocess.CalledProcessError as e:
-                        st.error(f"Evaluation failed with exit code {e.returncode}")
-                        st.code(e.stderr)
+                if not repo_valid:
+                    st.error("Invalid repository format. Use owner/repo")
+                else:
+                    with st.spinner("Running eval harness (this may take a while)..."):
+                        try:
+                            # Run the eval script as a subprocess
+                            result = subprocess.run(
+                                [sys.executable, "-m", "evals.eval", "--repo", eval_repo],
+                                capture_output=True,
+                                text=True,
+                                check=True,
+                                timeout=EVAL_TIMEOUT_SECONDS,
+                            )
+                            st.success("Evaluation completed successfully!")
+                            with st.expander("Subprocess Output", expanded=False):
+                                st.code(result.stdout)
+                            # Clear cache so new results are loaded
+                            st.cache_data.clear()
+                            # Reload the page to reflect new eval data
+                            st.rerun()
+                        except subprocess.TimeoutExpired:
+                            st.error(f"Evaluation timed out after {EVAL_TIMEOUT_SECONDS} seconds")
+                        except subprocess.CalledProcessError as e:
+                            st.error(f"Evaluation failed with exit code {e.returncode}")
+                            st.code(e.stderr)
 
     # ── Summary from eval_summary.json ───────────────────────────────────────
     if eval_data and "summary" in eval_data:

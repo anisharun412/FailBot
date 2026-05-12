@@ -11,7 +11,10 @@ import sys
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = list(argv or sys.argv[1:])
+    if argv is None:
+        argv = list(sys.argv[1:])
+    else:
+        argv = list(argv)
 
     # Ensure streamlit is available
     streamlit_cmd = shutil.which("streamlit")

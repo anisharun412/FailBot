@@ -73,19 +73,25 @@ class TokenCounter:
         
         if strategy == "head_tail":
             # Keep first 1/3 and last 2/3 of tokens
-            head_tokens = max(500, max_tokens // 3)
-            tail_tokens = max_tokens - head_tokens
+            head_tokens = max_tokens // 3
+            tail_tokens = max(0, max_tokens - head_tokens)
             
             # Encode and split
             encoded = self.encoding.encode(text)
-            head = encoded[:head_tokens]
-            tail = encoded[-tail_tokens:]
+            head = encoded[:head_tokens] if head_tokens > 0 else []
+            tail = encoded[-tail_tokens:] if tail_tokens > 0 else []
             
             # Decode back
             head_text = self.encoding.decode(head)
             tail_text = self.encoding.decode(tail)
             
-            truncated = f"{head_text}\n\n...[TRUNCATED - {token_count - max_tokens} tokens removed]...\n\n{tail_text}"
+            if tail_tokens > 0:
+                truncated = (
+                    f"{head_text}\n\n...[TRUNCATED - {token_count - max_tokens} tokens removed]...\n\n"
+                    f"{tail_text}"
+                )
+            else:
+                truncated = f"{head_text}\n\n...[TRUNCATED - {token_count - max_tokens} tokens removed]..."
             reason = f"Log truncated: {token_count} tokens → {max_tokens} tokens (head+tail strategy)"
         
         else:  # strategy == "tail"

@@ -258,7 +258,8 @@ Examples:
         print_summary(state)
         
         # Exit with status code
-        sys.exit(0 if state.get("status") == "completed" else 1)
+        success_statuses = {"completed", "report_complete", "file_issue_complete"}
+        sys.exit(0 if state.get("status") in success_statuses else 1)
     
     except KeyboardInterrupt:
         print("\n✗ Interrupted by user")

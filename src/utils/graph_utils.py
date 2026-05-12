@@ -45,9 +45,9 @@ def log_node_start(
     record.node = node_name
     record.event_type = "node_start"
     record.data = {
-        "log_source": state.get("log_source", "")[:50],  # Truncate for readability
+        "log_source": (state.get("log_source") or "")[:50],  # Truncate for readability
         "status": state.get("status", "unknown"),
-        "errors_count": len(state.get("errors", [])),
+        "errors_count": len(state.get("errors") or []),
     }
     
     logger.handle(record)
@@ -80,12 +80,12 @@ def log_node_end(
     }
     
     if node_name == "ingest":
-        data["log_text_length"] = len(state.get("log_text", ""))
+        data["log_text_length"] = len(state.get("log_text") or "")
         data["truncated"] = state.get("log_truncated_reason") is not None
     
     elif node_name == "parse_log":
         data["has_error_signature"] = state.get("error_signature") is not None
-        data["files_changed_count"] = len(state.get("files_changed", []))
+        data["files_changed_count"] = len(state.get("files_changed") or [])
     
     elif node_name == "triage":
         data["category"] = state.get("failure_category", "unknown")
@@ -95,7 +95,7 @@ def log_node_end(
     elif node_name == "suggest_test":
         data["test_language"] = state.get("test_language", "unknown")
         data["has_test"] = state.get("suggested_test") is not None
-        data["validation_errors"] = len(state.get("test_validation_errors", []))
+        data["validation_errors"] = len(state.get("test_validation_errors") or [])
     
     elif node_name == "file_issue":
         data["has_issue_url"] = state.get("github_issue_url") is not None
@@ -139,7 +139,13 @@ def handle_node_error(
         state: Current state (will be modified)
     """
     error_msg = f"{node_name}: {type(error).__name__}: {str(error)}"
-    state["errors"].append(error_msg)
+    if not isinstance(state.get("errors"), list):
+        state["errors"] = []
+    state["errors"].append({
+        "node": node_name,
+        "error": str(error),
+        "type": type(error).__name__,
+    })
     
     record = logging.LogRecord(
         name="failbot",
@@ -194,11 +200,11 @@ def format_state_snapshot(state: FailBotState) -> Dict[str, Any]:
         Snapshot dictionary
     """
     return {
-        "run_id": state.get("run_id", "")[:8],
+        "run_id": (state.get("run_id") or "")[:8],
         "status": state.get("status", "unknown"),
         "failure_category": state.get("failure_category", None),
         "severity": state.get("severity", None),
-        "errors_count": len(state.get("errors", [])),
+        "errors_count": len(state.get("errors") or []),
         "has_test": state.get("suggested_test") is not None,
         "has_issue_url": state.get("github_issue_url") is not None,
     }
@@ -214,14 +220,35 @@ def create_execution_summary(state: FailBotState) -> Dict[str, Any]:
     Returns:
         Summary dictionary
     """
-    node_durations = state.get("node_durations_ms") or state.get("node_timestamps", {})
-    total_duration_ms = sum(node_durations.values())
+    node_durations = state.get("node_durations_ms")
+    if not isinstance(node_durations, dict) or not node_durations:
+        node_timestamps = state.get("node_timestamps")
+        if isinstance(node_timestamps, dict):
+            node_durations = node_timestamps
+        else:
+            node_durations = {}
+    total_duration_ms = sum(
+        float(value)
+        for value in node_durations.values()
+        if isinstance(value, (int, float))
+    )
+
+    started_at = state.get("started_at")
+    if isinstance(started_at, datetime):
+        started_at_value = started_at.isoformat()
+    elif isinstance(started_at, str):
+        started_at_value = started_at
+    else:
+        started_at_value = None
     
+    error_list = state.get("errors") or []
+    skipped_nodes = state.get("skipped_nodes") or []
+
     summary = {
-        "run_id": state["run_id"],
+        "run_id": state.get("run_id") or "",
         "status": state.get("status", "unknown"),
         "total_duration_ms": total_duration_ms,
-        "started_at": state.get("started_at", "").isoformat() if state.get("started_at") else None,
+        "started_at": started_at_value,
         
         # Triage results
         "failure_category": state.get("failure_category"),
@@ -237,11 +264,11 @@ def create_execution_summary(state: FailBotState) -> Dict[str, Any]:
         "fallback_issue_path": state.get("fallback_issue_path"),
         
         # Errors
-        "error_count": len(state.get("errors", [])),
-        "errors": state.get("errors", []),
+        "error_count": len(error_list),
+        "errors": error_list,
         
         # Skipped nodes
-        "skipped_nodes": state.get("skipped_nodes", []),
+        "skipped_nodes": skipped_nodes,
     }
     
     return summary

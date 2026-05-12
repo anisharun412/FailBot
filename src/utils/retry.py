@@ -7,6 +7,7 @@ Implements exponential backoff retry logic for async functions.
 import asyncio
 import random
 import logging
+import time
 from functools import wraps
 from typing import Callable, Type, Tuple, Optional, Any
 
@@ -22,6 +23,10 @@ class RetryError(Exception):
         super().__init__(
             f"Failed after {max_attempts} attempts: {str(last_exception)}"
         )
+
+
+class PermanentError(Exception):
+    """Raised for errors that should not be retried."""
 
 
 def should_retry(exception: Exception) -> bool:
@@ -40,6 +45,9 @@ def should_retry(exception: Exception) -> bool:
     Returns:
         True if exception is retryable
     """
+    if isinstance(exception, PermanentError):
+        return False
+
     retryable_patterns = [
         "APIError",
         "RateLimitError",
@@ -208,9 +216,7 @@ def sync_retry(
                         f"Retrying in {delay:.2f}s..."
                     )
                     
-                    asyncio.run(asyncio.sleep(delay)) if asyncio.iscoroutinefunction(
-                        func
-                    ) else __import__("time").sleep(delay)
+                    time.sleep(delay)
             
             if last_exception is not None:
                 raise RetryError(max_attempts, last_exception)

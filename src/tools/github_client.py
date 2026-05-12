@@ -6,11 +6,12 @@ import logging
 import os
 import re
 import shlex
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
 from src.utils.retry import async_retry
+from src.utils.retry import PermanentError
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class MCPGitHubServer:
         self.writer: Optional[asyncio.StreamWriter] = None
         self._stderr_task: Optional[asyncio.Task] = None
         self._next_id = 1
+        self._request_lock = asyncio.Lock()
 
     async def start(self) -> bool:
         """
@@ -138,23 +140,24 @@ class MCPGitHubServer:
         return json.loads(body.decode("utf-8"))
 
     async def _request(self, method: str, params: dict) -> dict:
-        request_id = self._next_id
-        self._next_id += 1
+        async with self._request_lock:
+            request_id = self._next_id
+            self._next_id += 1
 
-        await self._send_message({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        })
+            await self._send_message({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": params,
+            })
 
-        while True:
-            response = await self._read_message()
-            if response.get("id") != request_id:
-                continue
-            if "error" in response:
-                raise RuntimeError(response["error"])
-            return response
+            while True:
+                response = await self._read_message()
+                if response.get("id") != request_id:
+                    continue
+                if "error" in response:
+                    raise RuntimeError(response["error"])
+                return response
 
     async def _notify(self, method: str, params: dict) -> None:
         await self._send_message({
@@ -224,6 +227,18 @@ class MCPGitHubServer:
                 self.process.terminate()
             except Exception:
                 pass
+
+
+class GitHubAuthenticationError(PermanentError):
+    """GitHub authentication failed."""
+
+
+class GitHubAuthorizationError(PermanentError):
+    """GitHub authorization failed or rate limited."""
+
+
+class GitHubNotFoundError(PermanentError):
+    """GitHub repository or resource was not found."""
 
 
 def _extract_issue_url(result: Optional[dict]) -> Optional[str]:
@@ -300,7 +315,7 @@ class GitHubRESTClient:
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/issues"
         
-        payload = {
+        payload: dict[str, Any] = {
             "title": title,
             "body": body
         }
@@ -316,11 +331,11 @@ class GitHubRESTClient:
             )
             
             if response.status_code == 401:
-                raise PermissionError("GitHub authentication failed (401)")
+                raise GitHubAuthenticationError("GitHub authentication failed (401)")
             elif response.status_code == 403:
-                raise PermissionError("GitHub rate limit exceeded or access denied (403)")
+                raise GitHubAuthorizationError("GitHub rate limit exceeded or access denied (403)")
             elif response.status_code == 404:
-                raise ValueError(f"Repository not found: {owner}/{repo}")
+                raise GitHubNotFoundError(f"Repository not found: {owner}/{repo}")
             
             response.raise_for_status()
             
@@ -433,7 +448,9 @@ class GitHubClient:
     def __del__(self):
         if self.mcp_server:
             try:
-                self.mcp_server.process.terminate()
+                process = getattr(self.mcp_server, "process", None)
+                if process is not None:
+                    process.terminate()
             except Exception:
                 pass
 

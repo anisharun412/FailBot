@@ -3,6 +3,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -14,6 +15,7 @@ import streamlit as st
 
 # Project root on path
 _ROOT = Path(__file__).resolve().parents[2]
+logger = logging.getLogger(__name__)
 
 
 def _card(content: str) -> None:
@@ -115,11 +117,19 @@ def _render_result(state: dict) -> None:
         if issue_url:
             st.markdown("---")
             st.markdown(f"**📝 Issue:** `{issue_url}`")
-            issue_path = Path(issue_url)
-            if issue_path.exists():
-                content = issue_path.read_text(encoding="utf-8")
-                with st.expander("View issue content"):
-                    st.markdown(content)
+            if not issue_url.startswith(("http://", "https://")):
+                try:
+                    issue_path = Path(issue_url)
+                    resolved_path = issue_path.resolve()
+                    allowed_base = (_ROOT / "runs").resolve()
+                    if resolved_path.is_file() and resolved_path.is_relative_to(allowed_base):
+                        content = resolved_path.read_text(encoding="utf-8")
+                        with st.expander("View issue content"):
+                            st.markdown(content)
+                    else:
+                        st.warning(f"Issue path is outside expected directory: {issue_url}")
+                except (OSError, ValueError) as exc:
+                    st.warning(f"Unable to read issue file: {exc}")
 
     with t3:
         # Show full state as formatted JSON (excluding large raw logs)
@@ -234,7 +244,7 @@ def render_run_failbot() -> None:
         suffix = Path(uploaded_file.name).suffix or ".log"
         tmp = tempfile.NamedTemporaryFile(
             delete=False, suffix=suffix,
-            dir=str(_ROOT), prefix="failbot_upload_"
+            prefix="failbot_upload_"
         )
         tmp.write(uploaded_file.read())
         tmp.close()
@@ -332,5 +342,5 @@ def render_run_failbot() -> None:
         if tmp_path and tmp_path.exists():
             try:
                 tmp_path.unlink()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to clean up temp file %s: %s", tmp_path, exc)

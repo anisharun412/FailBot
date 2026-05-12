@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional
+import uuid
 
 from rapidfuzz import fuzz
 
@@ -25,6 +26,7 @@ class KnownErrorsDB:
         """
         self.db_path = Path(db_path)
         self.errors = []
+        self._save_key = "errors"
         self.load()
     
     def load(self):
@@ -37,8 +39,15 @@ class KnownErrorsDB:
         try:
             with open(self.db_path, "r") as f:
                 data = json.load(f)
-                # Support both "errors" and "patterns" keys for compatibility
-                self.errors = data.get("errors") or data.get("patterns", [])
+                if "patterns" in data:
+                    self._save_key = "patterns"
+                    self.errors = data.get("patterns", [])
+                elif "errors" in data:
+                    self._save_key = "errors"
+                    self.errors = data.get("errors", [])
+                else:
+                    self._save_key = "errors"
+                    self.errors = []
             logger.info(f"Loaded {len(self.errors)} known error patterns")
         except Exception as e:
             logger.error(f"Failed to load known errors: {e}")
@@ -107,7 +116,20 @@ class KnownErrorsDB:
         Returns:
             The created error record
         """
-        error_id = max([e.get("id", 0) for e in self.errors] + [0]) + 1
+        existing_ids = [
+            e.get("id") for e in self.errors
+            if isinstance(e, dict) and e.get("id") is not None
+        ]
+        if not existing_ids or all(isinstance(eid, int) for eid in existing_ids):
+            numeric_ids = [eid for eid in existing_ids if isinstance(eid, int)]
+            error_id = max(numeric_ids, default=0) + 1
+        else:
+            error_id = f"custom_error_{uuid.uuid4().hex[:8]}"
+            while any(
+                isinstance(e, dict) and e.get("id") == error_id
+                for e in self.errors
+            ):
+                error_id = f"custom_error_{uuid.uuid4().hex[:8]}"
         
         record = {
             "id": error_id,
@@ -132,7 +154,7 @@ class KnownErrorsDB:
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.db_path, "w") as f:
-                json.dump({"errors": self.errors}, f, indent=2)
+                json.dump({getattr(self, "_save_key", "errors"): self.errors}, f, indent=2)
             logger.debug(f"Saved {len(self.errors)} errors to {self.db_path}")
         except Exception as e:
             logger.error(f"Failed to save knowledge base: {e}")

@@ -203,6 +203,8 @@ Severity: {severity}
         except Exception as llm_error:
             logger.error(f"Strategy generation failed: {llm_error}")
             
+            if not isinstance(state.get("errors"), list):
+                state["errors"] = []
             state["errors"].append({
                 "node": "suggest_test_generic",
                 "error": f"Strategy generation failed: {str(llm_error)}",
@@ -261,6 +263,9 @@ Severity: {severity}
         token_counter = TokenCounter("gpt-4o-mini")
         strategy_tokens: int = token_counter.count_tokens(strategy_result.test_strategy)
         input_tokens: int = token_counter.count_tokens(error_context)
+
+        if not isinstance(state.get("token_counts"), dict):
+            state["token_counts"] = {}
         
         state["token_counts"]["suggest_test_generic_input"] = input_tokens
         state["token_counts"]["suggest_test_generic_output"] = strategy_tokens
@@ -275,157 +280,7 @@ Severity: {severity}
         error_msg = f"Suggest test generic node failed: {str(e)}"
         logger.error(error_msg, exc_info=True)
         
-        state["errors"].append({
-            "node": "suggest_test_generic",
-            "error": str(e),
-            "type": type(e).__name__
-        })
-        
-        state["status"] = "suggest_test_generic_failed"
-        handle_node_error(logger, state["run_id"], "suggest_test_generic", e, state)
-        
-        raise
-    """
-    Suggest test generic node: Generate test strategies for non-code-bug failures.
-    
-    For flaky and infrastructure failures, generates testing strategies rather than
-    specific test code. Helps identify root causes and validate fixes.
-    
-    Args:
-        state: FailBotState with error info and failure_category
-        
-    Returns:
-        Updated state dict with:
-        - suggested_test: Test strategy description (not code)
-        - test_language: Set to 'strategy'
-        - status: Updated to 'suggest_test_generic_complete'
-        - errors: Appended with any errors
-    """
-    start_time = log_node_start(
-        logger, state["run_id"], "suggest_test_generic", state
-    )
-    
-    try:
-        config = get_config()
-        
-        # Check prerequisites
-        if not state.get("error_signature"):
-            raise ValueError("Error signature not available")
-        
-        if not state.get("failure_category"):
-            raise ValueError("Failure category not available")
-        
-        log_event(
-            logger, state["run_id"], "suggest_test_generic",
-            "strategy_generation_start",
-            {
-                "category": state["failure_category"],
-                "error_sig": state["error_signature"][:80]
-            }
-        )
-        
-        # Build context
-        error_context = f"""
-Error signature: {state.get('error_signature')}
-Files affected: {', '.join(state.get('files_changed', [])[:3])}
-Log preview: {state.get('log_text', '')[:300]}
-Severity: {state.get('severity', 'unknown')}
-"""
-        
-        # Initialize LLM (tool calling with knowledge base - no JSON mode)
-        model = get_chat_model(
-            role="test_suggester",
-            temperature=0.3,
-            max_tokens=1000,
-        )
-        
-        # Generate strategy
-        try:
-            strategy_result = await call_test_strategy_agent(
-                state["error_signature"],
-                state["failure_category"],
-                error_context,
-                model,
-                config
-            )
-            generation_success = True
-        except Exception as llm_error:
-            logger.error(f"Strategy generation failed: {llm_error}")
-            
-            if "errors" not in state or state["errors"] is None:
-                state["errors"] = []
-            state["errors"].append({
-                "node": "suggest_test_generic",
-                "error": f"Strategy generation failed: {str(llm_error)}",
-                "type": "generation_error"
-            })
-            
-            # Provide default strategy based on category
-            if state["failure_category"] == "flaky":
-                strategy = (
-                    "Run the test multiple times (50-100 iterations) in sequence. "
-                    "If it consistently fails or passes, the test may not be flaky. "
-                    "If failures are sporadic, investigate timing, concurrency, or resource issues."
-                )
-                strategy_type = "flakiness_test"
-            elif state["failure_category"] == "infra":
-                strategy = (
-                    "Check infrastructure assumptions: verify network connectivity, "
-                    "file system permissions, DNS resolution, environment variables, "
-                    "and resource availability (disk space, memory). Test in different environments."
-                )
-                strategy_type = "infrastructure_test"
-            else:
-                strategy = (
-                    "Investigate the failure conditions: review logs, "
-                    "examine state changes, check for race conditions or resource exhaustion."
-                )
-                strategy_type = "root_cause_analysis"
-            
-            strategy_result = TestStrategyOutput(
-                test_strategy=strategy,
-                strategy_type=strategy_type,
-                confidence=0.5,
-                expected_outcomes=[]
-            )
-            generation_success = False
-        
-        log_event(
-            logger, state["run_id"], "suggest_test_generic",
-            "strategy_generation_complete",
-            {
-                "type": strategy_result.strategy_type,
-                "success": generation_success,
-                "confidence": strategy_result.confidence
-            }
-        )
-        
-        # Update state
-        state["suggested_test"] = strategy_result.test_strategy
-        state["test_language"] = "strategy"
-        state["test_confidence"] = strategy_result.confidence
-        state["test_description"] = f"Strategy ({strategy_result.strategy_type})"
-        
-        # Track tokens
-        token_counter = TokenCounter("gpt-4o-mini")
-        strategy_tokens = token_counter.count_tokens(strategy_result.test_strategy)
-        
-        if "token_counts" not in state or state["token_counts"] is None:
-            state["token_counts"] = {}
-        state["token_counts"]["suggest_test_generic_input"] = token_counter.count_tokens(error_context)
-        state["token_counts"]["suggest_test_generic_output"] = strategy_tokens
-        
-        state["status"] = "suggest_test_generic_complete"
-        
-        log_node_end(logger, state["run_id"], "suggest_test_generic", state, start_time)
-        
-        return state
-        
-    except Exception as e:
-        error_msg = f"Suggest test generic node failed: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        if "errors" not in state or state["errors"] is None:
+        if not isinstance(state.get("errors"), list):
             state["errors"] = []
         state["errors"].append({
             "node": "suggest_test_generic",
