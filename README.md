@@ -16,6 +16,14 @@ A LangGraph-based multi-agent system that ingests CI logs, parses failure contex
 
 ## Quick Start
 
+### 1. Clone & Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/anisharun412/failbot.git
+cd failbot
+```
+
 ### Use Astral `uv`
 
 If you prefer reproducing environments and running commands with Astral's `uv` CLI can sync from `uv.lock` and execute commands inside the locked environment.
@@ -36,16 +44,12 @@ uv run -- streamlit run dashboard/app.py
 
 The `uv.lock` file in the repo pins dependency versions so `uv sync` reproduces a consistent environment across machines.
 
-
-### 1. Clone & Setup
-
+### Alternative : Use Python pip
 ```bash
-# Clone the repository
-git clone https://github.com/anisharun412/failbot.git
-cd failbot
-
 # Create virtual environment
 python3.11 -m venv venv
+
+# on linux:
 source venv/bin/activate
   
 # On Windows: 
@@ -110,6 +114,9 @@ failbot/
 │   └── results/        # Analysis outputs
 ├── tests/              # Unit & integration tests (expand as needed)
 ├── docs/               # Architecture & guides (in progress)
+├── dashboard/
+│   └── components/
+├── .streamlit/ 
 └── README.md
 ```
 
@@ -261,8 +268,8 @@ If you use FailBot in research, please cite:
 ```bibtex
 @software{failbot2026,
   title={FailBot: Multi-Agent CI Failure Triage and Test Generation},
-  author={FailBot Team},
+  author={https://github.com/anisharun412},
   year={2026},
-  url={https://github.com/your-org/failbot}
+  url={https://github.com/anisharun412/failbot}
 }
 ```
