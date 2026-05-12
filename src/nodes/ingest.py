@@ -109,7 +109,7 @@ async def _fetch_github_actions_logs(owner: str, repo: str, run_id: str) -> str:
     return "\n\n".join(combined_logs)
 
 
-async def ingest_node(state: FailBotState) -> dict[str, Any]:
+async def ingest_node(state: FailBotState) -> FailBotState:
     """
     Ingest node: Fetch CI log and preprocess (truncate to token limit).
     
@@ -123,7 +123,7 @@ async def ingest_node(state: FailBotState) -> dict[str, Any]:
         Updated state dict with:
         - log_text_full: Original log content
         - log_text: Truncated log content
-        - log_text_truncated_reason: Reason for truncation (or None)
+        - log_truncated_reason: Reason for truncation (or None)
         - raw_log_length: Character count of original log
         - token_counts: Dict with 'ingest_input' and 'ingest_output' tokens
         - status: Updated to 'ingest_complete'
@@ -177,7 +177,7 @@ async def ingest_node(state: FailBotState) -> dict[str, Any]:
         # Update state
         state["log_text_full"] = log_text_full
         state["log_text"] = log_text
-        state["log_text_truncated_reason"] = truncation_reason
+        state["log_truncated_reason"] = truncation_reason
         state["raw_log_length"] = raw_log_length
         
         # Track tokens

@@ -1,49 +1,60 @@
 # FailBot - Multi-Agent CI Failure Triage & Test Generation
 
-A LangGraph-based multi-agent system that automatically triages CI failures, generates regression tests, and files GitHub issues.
+A LangGraph-based multi-agent system that ingests CI logs, parses failure context, triages likely causes, generates regression tests, and files GitHub issues with fallback handling for missing integrations.
 
 ## Features
 
-- **Multi-Agent Pipeline**: LogParserAgent → TriageAgent → TestSuggesterAgent → IssueFilingAgent
-- **Tool Binding (LangGraph-native)**: Tools are bound to LLMs with `@tool` + ToolNode execution
-- **MCP GitHub Support**: Optional MCP server → REST API → Local file fallback
-- **Structured Logging**: JSON-line logging with token tracking and latency metrics
-- **Production-Ready**: Error recovery, retry logic, comprehensive documentation
+- **Multi-Agent Pipeline**: Ingest → Parse Log → Triage → Suggest Test / Suggest Test Generic → File Issue → Report
+- **LangGraph Routing**: Conditional edges and node state updates drive the flow
+- **Model Selection**: Uses Groq first when `GROQ_API_KEY` is set, otherwise falls back to OpenAI via `OPENAI_API_KEY`
+- **Tool Binding**: Tools are bound to LLMs with `@tool` + ToolNode execution where available
+- **MCP GitHub Support**: Optional MCP server → REST API → local file fallback
+- **Structured Logging**: JSON-line logging with token tracking, latency metrics, and execution summaries
+- **Log Truncation Awareness**: Head+tail truncation with a stored truncation reason for large logs
+- **Evaluation Harness**: Batch evals, ground-truth scoring, and result reports for regression tracking
+- **Monitoring UIs**: Streamlit dashboard for analysis and a Rich terminal dashboard for live run logs
 
 ## Quick Start
+
+### Use Astral `uv`
+
+If you prefer reproducing environments and running commands with Astral's `uv` CLI can sync from `uv.lock` and execute commands inside the locked environment.
+
+#### Install `uv` : pip install uv
+
+```bash
+# Sync the environment from the checked-in lockfile (no venv needed)
+uv sync
+
+# Run FailBot inside the synced environment
+uv run -- python -m src.main --log-source /path/to/log.txt --repo owner/repo
+
+# Run the Streamlit dashboard inside the synced environment
+uv run -- streamlit run dashboard/app.py
+
+```
+
+The `uv.lock` file in the repo pins dependency versions so `uv sync` reproduces a consistent environment across machines.
+
 
 ### 1. Clone & Setup
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/failbot.git
+git clone https://github.com/anisharun412/failbot.git
 cd failbot
 
 # Create virtual environment
 python3.11 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
+  
+# On Windows: 
+venv\Scripts\activate
 
 # Install dependencies
 pip install -e ".[dev]"
 ```
-
-### 2. Configure
-
-```bash
-# Copy environment template
-cp .env.example .env
-
-# Edit .env with your API keys
-export OPENAI_API_KEY=sk-...
-export GITHUB_TOKEN=ghp_...
-
-# Optional MCP GitHub integration
-export FAILBOT_USE_MCP=true
-export MCP_GITHUB_SERVER_CMD="npx -y @modelcontextprotocol/server-github"
-export MCP_GITHUB_TOOL_CREATE_ISSUE=create_issue
-```
-
-### 3. Run
+### 2. Run
 
 ```bash
 # Run FailBot on a CI log file
@@ -55,14 +66,16 @@ python -m src.main --log-source https://github.com/.../logs/1234 --repo owner/re
 
 ## Architecture
 
+![FailBot graph](failbot_graph.png)
+
 ```
 Input Log
     ↓
-[Ingest] → Fetch & Truncate (8000 tokens max)
+[Ingest] → Fetch & Truncate (head+tail strategy, token-limited)
     ↓
-[Parse Log Agent] → Extract error signature, files, language
+[Parse Log] → Extract error signature, files, language
     ↓
-[Triage Agent] → Classify: code_bug | flaky | infra | unknown
+[Triage] → Classify: code_bug | flaky | infra | unknown
     ↓
          ├→ "code_bug" ──→ [Suggest Test] → Generate regression test
          ├→ "flaky"    ──→ [Suggest Test Generic] → Tool-aware strategy
@@ -72,6 +85,8 @@ Input Log
     ↓
 [Report] → Print summary, save results
 ```
+
+The live graph is defined in [src/graph.py](src/graph.py) and the shared state is defined in [src/state.py](src/state.py).
 
 ## Project Structure
 
@@ -128,6 +143,19 @@ python -m evals.eval --repo owner/repo
 Inputs live in `evals/test_logs/` and expected outputs in `evals/ground_truth.json`.
 Results are written to `evals/results/` (CSV, JSON summary, and HTML report).
 
+## Dashboard
+
+FailBot includes two dashboards:
+
+- The Streamlit dashboard in the [dashboard/](dashboard/) folder for monitoring runs, eval scores, issues, and pipeline health
+
+```bash
+streamlit run dashboard/app.py
+```
+
+The Streamlit dashboard reads `runs/summary_*.json`, `evals/results/eval_summary.json`, and issue drafts to show the current system status, execution history, and evaluation results. The terminal dashboard tails JSONL run logs in real time and shows node status, errors, and timing.
+```
+
 ## Documentation
 
 - [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md) — Code practice consistency details
@@ -137,6 +165,7 @@ Results are written to `evals/results/` (CSV, JSON summary, and HTML report).
 - [docs/EVAL_WORKFLOW.md](docs/EVAL_WORKFLOW.md) — Evaluation workflow
 - [docs/API.md](docs/API.md) — CLI and API reference
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Deployment notes
+- [failbot_graph.png](failbot_graph.png) — Current pipeline graph image
 
 ## Development
 
@@ -147,6 +176,8 @@ python test_code_consistency.py
 python test_tool_binding.py
 python test_phase5.py
 ```
+
+The test suite also includes eval and workflow coverage under `tests/` and `evals/` for parser behavior, metrics, and run scoring.
 
 ### Code Quality
 

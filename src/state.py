@@ -61,9 +61,10 @@ class FailBotState(TypedDict):
     github_issue_created_at: Optional[str]  # ISO8601 timestamp
 
     # ========== STATUS TRACKING ==========
-    status: Literal["pending", "in_progress", "completed", "failed", "parse_complete", 
-                   "parse_failed", "triage_complete", "triage_failed", "suggest_test_complete",
-                   "suggest_test_failed", "file_issue_complete", "file_issue_failed", 
+    status: Literal["pending", "in_progress", "completed", "failed", "ingest_complete", 
+                   "ingest_failed", "parse_complete", "parse_failed", "triage_complete", 
+                   "triage_failed", "suggest_test_complete", "suggest_test_failed", 
+                   "file_issue_complete", "file_issue_failed", 
                    "suggest_test_generic_complete", "suggest_test_generic_failed", 
                    "report_complete", "report_failed"]
     errors: List[Dict[str, Any]]       # Accumulated error dicts with details
