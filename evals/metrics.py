@@ -53,12 +53,21 @@ def compute_row_metrics(state: Dict[str, Any], expected: Dict[str, Any]) -> Dict
 
     expected_category = expected.get("expected_category")
     expected_severity = expected.get("expected_severity")
-    expected_keywords = expected.get("expected_test_keywords", [])
+    expected_keywords = expected.get("keywords_in_test")
+    if expected_keywords is None:
+        expected_keywords = expected.get("expected_test_keywords", [])
+
+    min_confidence = expected.get("min_confidence")
+    actual_confidence = state.get("triage_confidence")
+    confidence_ok = 1.0
+    if min_confidence is not None and actual_confidence is not None:
+        confidence_ok = 1.0 if float(actual_confidence) >= float(min_confidence) else 0.0
 
     return {
         "category_accuracy": score_category(predicted_category, expected_category),
         "severity_accuracy": score_severity(predicted_severity, expected_severity),
         "test_keyword_recall": score_keyword_recall(predicted_test, expected_keywords),
+        "confidence_ok": confidence_ok,
     }
 
 
@@ -67,6 +76,7 @@ def summarize(rows: Iterable[Dict[str, Any]]) -> Dict[str, float]:
         "category_accuracy": 0.0,
         "severity_accuracy": 0.0,
         "test_keyword_recall": 0.0,
+        "confidence_ok": 0.0,
     }
     count = 0
     for row in rows:

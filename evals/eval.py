@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 from evals.metrics import compute_row_metrics, summarize
+from evals.scoring import lookup_expected_entry, score_eval_run
 from src.main import run_failbot
 
 
@@ -31,6 +32,10 @@ async def _evaluate_log(
     duration_ms = int((time.time() - start) * 1000)
 
     metrics = compute_row_metrics(state, expected)
+    eval_scores = score_eval_run(state, expected)
+
+    node_durations_ms = state.get("node_durations_ms", {}) or {}
+    token_counts = state.get("token_counts", {}) or {}
 
     return {
         "log_file": log_path.name,
@@ -41,9 +46,60 @@ async def _evaluate_log(
         "triage_confidence": state.get("triage_confidence"),
         "test_language": state.get("test_language"),
         "github_issue_url": state.get("github_issue_url") or state.get("fallback_issue_path"),
+        "fallback_issue_path": state.get("fallback_issue_path"),
+        "agent_fallback_used": bool(state.get("agent_fallback_used")),
+        "issue_fallback_used": bool(state.get("issue_fallback_used")),
+        "node_durations_ms": json.dumps(node_durations_ms, sort_keys=True),
+        "total_duration_ms": sum(float(value) for value in node_durations_ms.values()),
+        "token_counts": json.dumps(token_counts, sort_keys=True),
+        "total_tokens": sum(int(value) for value in token_counts.values()),
+        "execution_summary_path": state.get("execution_summary_path"),
         "error_count": len(state.get("errors", [])),
+        "eval_scores": json.dumps(eval_scores, sort_keys=True),
+        "eval_category_match": eval_scores.get("category_match"),
+        "eval_severity_match": eval_scores.get("severity_match"),
+        "eval_test_relevance": eval_scores.get("test_relevance"),
+        "eval_confidence_ok": eval_scores.get("confidence_ok"),
         **metrics,
     }
+
+
+def _discover_log_files(logs_dir: Path) -> List[Path]:
+    allowed_suffixes = {".txt", ".log"}
+    return sorted(
+        path for path in logs_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in allowed_suffixes
+    )
+
+
+def _render_markdown_table(rows: List[Dict[str, Any]]) -> str:
+    if not rows:
+        return "No evaluation rows were produced."
+
+    headers = [
+        "log_file",
+        "status",
+        "failure_category",
+        "severity",
+        "triage_confidence",
+        "category_accuracy",
+        "severity_accuracy",
+        "test_keyword_recall",
+        "eval_test_relevance",
+        "eval_confidence_ok",
+    ]
+
+    lines = ["| " + " | ".join(headers) + " |"]
+    lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
+    for row in rows:
+        values = []
+        for header in headers:
+            value = row.get(header, "")
+            if isinstance(value, float):
+                value = f"{value:.2f}"
+            values.append(str(value))
+        lines.append("| " + " | ".join(values) + " |")
+    return "\n".join(lines)
 
 
 async def run_evals(args: argparse.Namespace) -> int:
@@ -57,13 +113,13 @@ async def run_evals(args: argparse.Namespace) -> int:
     with open(args.ground_truth, "r", encoding="utf-8") as handle:
         ground_truth = json.load(handle)
 
-    log_files = sorted(logs_dir.glob("*.txt"))
+    log_files = _discover_log_files(logs_dir)
     if args.limit:
         log_files = log_files[: args.limit]
 
     rows: List[Dict[str, Any]] = []
     for log_path in log_files:
-        expected = ground_truth.get(log_path.name)
+        _, expected = lookup_expected_entry(str(log_path), ground_truth)
         if not expected:
             continue
 
@@ -81,6 +137,7 @@ async def run_evals(args: argparse.Namespace) -> int:
     csv_path = output_dir / "eval_results.csv"
     json_path = output_dir / "eval_summary.json"
     html_path = output_dir / "eval_report.html"
+    markdown_path = output_dir / "eval_report.md"
 
     if rows:
         with open(csv_path, "w", newline="", encoding="utf-8") as handle:
@@ -90,6 +147,17 @@ async def run_evals(args: argparse.Namespace) -> int:
 
     with open(json_path, "w", encoding="utf-8") as handle:
         json.dump({"summary": summary, "rows": rows}, handle, indent=2)
+
+    with open(markdown_path, "w", encoding="utf-8") as handle:
+        handle.write("# FailBot Evaluation Report\n\n")
+        handle.write("## Summary\n\n")
+        handle.write("| Metric | Value |\n")
+        handle.write("| --- | ---: |\n")
+        for key, value in summary.items():
+            handle.write(f"| {key} | {value:.2f} |\n")
+        handle.write("\n## Runs\n\n")
+        handle.write(_render_markdown_table(rows))
+        handle.write("\n")
 
     with open(html_path, "w", encoding="utf-8") as handle:
         handle.write("<html><head><title>FailBot Eval Report</title></head><body>")
@@ -117,6 +185,7 @@ async def run_evals(args: argparse.Namespace) -> int:
 
     print(f"Eval results saved to: {csv_path}")
     print(f"Eval summary saved to: {json_path}")
+    print(f"Eval markdown report saved to: {markdown_path}")
     print(f"Eval report saved to: {html_path}")
     return 0
 

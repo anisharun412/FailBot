@@ -4,7 +4,7 @@ Token Counter Utility
 Handles token counting and log truncation for different LLM models.
 """
 
-from typing import Tuple
+from typing import Tuple, Optional
 import tiktoken
 
 
@@ -117,7 +117,7 @@ class TokenCounter:
 
 
 # Default counter instance
-_default_counter: TokenCounter = None
+_default_counter: Optional[TokenCounter] = None
 
 
 def get_token_counter(model_name: str = "gpt-4o-mini") -> TokenCounter:

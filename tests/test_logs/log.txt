@@ -1,0 +1,32 @@
+[INFO] Starting CI pipeline: test
+[INFO] Python 3.11.8 on Windows
+[INFO] Installing dependencies...
+[INFO] Running unit tests
+
+=================================== FAILURES ===================================
+____________________________ test_login_failure _____________________________
+
+    def test_login_failure():
+        user = get_test_user(unauthenticated=True)
+>       token = user.session.split(":")[1]
+E       AttributeError: 'NoneType' object has no attribute 'split'
+
+tests/test_auth.py:42: AttributeError
+
+During handling of the above exception, another exception occurred:
+
+    def test_login_failure():
+        user = get_test_user(unauthenticated=True)
+        token = user.session.split(":")[1]
+>       raise TypeError("Cannot split session token for unauthenticated user")
+E       TypeError: Cannot split session token for unauthenticated user
+
+Traceback (most recent call last):
+  File "tests/test_auth.py", line 42, in test_login_failure
+    token = user.session.split(":")[1]
+AttributeError: 'NoneType' object has no attribute 'split'
+
+FAILED tests/test_auth.py::test_login_failure
+=========================== short test summary info ===========================
+FAILED tests/test_auth.py::test_login_failure - TypeError: Cannot split session token for unauthenticated user
+============================== 1 failed in 4.32s ==============================

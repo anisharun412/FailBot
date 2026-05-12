@@ -1,13 +1,14 @@
 """Unit tests for tool runner helpers."""
 
-import pytest
+import asyncio
+
 from langchain_core.messages import AIMessage, ToolMessage
 
-from src.utils.tool_runner import run_tool_calls, parse_tool_message
+import src.utils.tool_runner as tool_runner
+from src.utils.tool_runner import parse_tool_message, run_tool_calls
 
 
-@pytest.mark.asyncio
-async def test_run_tool_calls_validate_code():
+async def _run_tool_calls_validate_code():
     message = AIMessage(
         content="Run tool",
         tool_calls=[
@@ -28,6 +29,11 @@ async def test_run_tool_calls_validate_code():
     )
     parsed = parse_tool_message(tool_message)
     assert parsed.get("is_valid") is True
+
+
+def test_run_tool_calls_validate_code(monkeypatch):
+    monkeypatch.setattr(tool_runner, "_TOOL_NODE", None)
+    asyncio.run(_run_tool_calls_validate_code())
 
 
 def test_parse_tool_message_raw():

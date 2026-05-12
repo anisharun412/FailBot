@@ -214,7 +214,8 @@ def create_execution_summary(state: FailBotState) -> Dict[str, Any]:
     Returns:
         Summary dictionary
     """
-    total_duration_ms = sum(state.get("node_timestamps", {}).values())
+    node_durations = state.get("node_durations_ms") or state.get("node_timestamps", {})
+    total_duration_ms = sum(node_durations.values())
     
     summary = {
         "run_id": state["run_id"],

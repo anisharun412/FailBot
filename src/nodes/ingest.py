@@ -1,7 +1,11 @@
 """Ingest node: Fetch and preprocess CI logs."""
 
 import asyncio
+import io
 import logging
+import os
+import re
+import zipfile
 from typing import Any
 
 import httpx
@@ -34,6 +38,16 @@ async def fetch_log_from_source(log_source: str) -> str:
     """
     # Try as URL first
     if log_source.startswith(("http://", "https://")):
+        gh_match = re.search(
+            r"https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/actions/runs/(?P<run_id>\d+)",
+            log_source,
+        )
+        if gh_match:
+            owner = gh_match.group("owner")
+            repo = gh_match.group("repo")
+            run_id = gh_match.group("run_id")
+            return await _fetch_github_actions_logs(owner, repo, run_id)
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(log_source)
             response.raise_for_status()
@@ -47,6 +61,52 @@ async def fetch_log_from_source(log_source: str) -> str:
         raise ValueError(f"Log source not found (not a URL and not a file): {log_source}")
     except IOError as e:
         raise ValueError(f"Error reading log file {log_source}: {e}")
+
+
+async def _fetch_github_actions_logs(owner: str, repo: str, run_id: str) -> str:
+    """
+    Fetch GitHub Actions logs for a given run and return combined text.
+
+    Args:
+        owner: GitHub owner/org
+        repo: Repository name
+        run_id: Actions run ID
+
+    Returns:
+        Combined log text as a single string
+    """
+    url = f"https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/logs"
+    headers = {
+        "Accept": "application/vnd.github+json",
+    }
+    token = os.getenv("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(url, headers=headers)
+        if response.status_code in {301, 302, 303, 307, 308}:
+            redirect_url = response.headers.get("Location")
+            if not redirect_url:
+                raise ValueError("GitHub logs redirect missing Location header")
+            logger.info("GitHub logs redirect received; downloading log archive")
+            response = await client.get(redirect_url)
+        response.raise_for_status()
+        zip_bytes = response.content
+
+    combined_logs: list[str] = []
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        for name in zf.namelist():
+            if name.endswith("/"):
+                continue
+            with zf.open(name) as fp:
+                content = fp.read().decode("utf-8", errors="replace")
+                combined_logs.append(f"===== {name} =====\n{content}")
+
+    if not combined_logs:
+        raise ValueError("No log files found in GitHub Actions logs archive")
+
+    return "\n\n".join(combined_logs)
 
 
 async def ingest_node(state: FailBotState) -> dict[str, Any]:

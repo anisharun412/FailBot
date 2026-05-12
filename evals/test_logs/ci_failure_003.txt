@@ -1,5 +1,25 @@
-[INFO] Build step: compile assets
+==============================================================================
+GitHub Actions - Build and Deploy
+==============================================================================
+Run actions/checkout@v3
+Run npm ci
+Run npm run build
+
+> web-app@1.0.0 build
+> webpack --mode production
+
+[webpack-cli] Compilation starting...
+[webpack-cli] ERROR in main
+Module build failed (from ./node_modules/babel-loader/lib/index.js):
+Error: EACCES: permission denied, mkdir '/var/lib/build/cache/.babel-cache'
+    at Object.mkdirSync (node:fs:1382:3)
+    at sync (/app/node_modules/mkdirp/index.js:72:13)
+    at save (/app/node_modules/babel-loader/lib/cache.js:142:3)
+    at /app/node_modules/babel-loader/lib/index.js:154:7
+
 [ERROR] Permission denied: '/var/lib/build/cache'
 [ERROR] Could not write to cache directory
 
-FATAL: disk write failed due to insufficient permissions
+FATAL: disk write failed due to insufficient permissions. 
+Check network or disk mounts in the CI runner.
+Error: Process completed with exit code 1.

@@ -29,21 +29,28 @@ def print_formatted_report(state: FailBotState) -> None:
     """
     Print formatted report to console using Rich.
     
+    Shows timing, token usage, and fallback information.
+    
     Args:
         state: FailBotState with all execution results
     """
     # Status panel
+    failure_category = state.get("failure_category") or "unknown"
+    error_signature = (state.get("error_signature") or "N/A")[:80]
+    suggested_test = state.get("suggested_test") or ""
+    test_language = state.get("test_language") or "text"
+
     status_color = {
         "code_bug": "red",
         "flaky": "yellow",
         "infra": "cyan",
         "unknown": "white"
-    }.get(state.get("failure_category"), "white")
+    }.get(failure_category, "white")
     
     status_text = f"""
-[bold][{status_color}]{state.get('failure_category', 'unknown').upper()}[/{status_color}][/bold]
+[bold][{status_color}]{failure_category.upper()}[/{status_color}][/bold]
 
-Error Signature: {state.get('error_signature', 'N/A')}
+Error Signature: {error_signature}
 Severity: {state.get('severity', 'unknown')}
 Confidence: {state.get('triage_confidence', 0):.0%}
 Status: {state.get('status', 'unknown')}
@@ -52,45 +59,87 @@ Status: {state.get('status', 'unknown')}
     console.print(Panel(status_text.strip(), title="Triage Result", expand=False))
     
     # Test/Strategy
-    if state.get("suggested_test"):
-        if state.get("test_language") == "strategy":
-            console.print(Panel(
-                state["suggested_test"],
-                title=f"Test Strategy ({state.get('test_description')})",
-                expand=False
-            ))
+    if suggested_test:
+        if test_language == "strategy":
+            try:
+                test_content = suggested_test
+                # Clean up Unicode characters that might cause encoding issues
+                test_content = test_content.encode('ascii', errors='replace').decode('ascii')
+                console.print(Panel(
+                    test_content,
+                    title=f"Test Strategy ({state.get('test_description')})",
+                    expand=False
+                ))
+            except Exception as e:
+                logger.warning(f"Failed to display test strategy: {e}")
+                console.print(f"Test strategy generated (display issue: {str(e)[:50]})")
         else:
-            # Show test code with syntax highlighting
-            syntax = Syntax(
-                state["suggested_test"],
-                state.get("test_language", "text"),
-                theme="monokai",
-                line_numbers=True
-            )
-            console.print(Panel(syntax, title=f"Generated Test ({state.get('test_language')})", expand=False))
+            try:
+                test_content = suggested_test[:2000]
+                # Clean up Unicode characters
+                test_content = test_content.encode('ascii', errors='replace').decode('ascii')
+                syntax = Syntax(
+                    test_content,
+                    test_language,
+                    theme="monokai",
+                    line_numbers=True
+                )
+                console.print(Panel(syntax, title=f"Generated Test ({state.get('test_language')})", expand=False))
+            except Exception as e:
+                logger.warning(f"Failed to display generated test: {e}")
+                console.print(f"Test code generated (display issue: {str(e)[:50]})")
     
     # Issue
     if state.get("github_issue_url"):
         issue_text = f"Issue filed at: {state['github_issue_url']}"
-        if state.get("fallback_issue_path"):
-            issue_text += " (local fallback)"
+        if state.get("issue_fallback_used"):
+            issue_text += " [yellow](markdown fallback)[/yellow]"
         console.print(Panel(issue_text, title="GitHub Issue", expand=False))
     
-    # Errors (if any)
-    if state.get("errors"):
+    # Errors (if any) - separate from fallbacks
+    non_fallback_errors = [
+        e for e in (state.get("errors", []))
+        if e.get("type") not in ["agent_fallback", "issue_fallback"]
+    ]
+    
+    if non_fallback_errors:
         errors_text = "\n".join(
-            f"• [{e.get('node', 'unknown')}] {e.get('error', 'Unknown error')}"
-            for e in state["errors"][:5]
+            f"* [{e.get('node', 'unknown')}] {e.get('error', 'Unknown error')}"
+            for e in non_fallback_errors[:3]
         )
         console.print(Panel(errors_text, title="Errors", expand=False, style="red"))
+    
+    # Fallback summary
+    fallback_items = []
+    if state.get("agent_fallback_used"):
+        fallback_items.append("log parsing used regex fallback")
+    if state.get("issue_fallback_used"):
+        fallback_items.append("issue filed to local markdown")
+    
+    if fallback_items:
+        fallback_text = "Run completed with non-critical fallbacks:\n* " + "\n* ".join(fallback_items)
+        console.print(Panel(fallback_text, title="Fallbacks", expand=False, style="yellow"))
+    
+    # Timing (if available)
+    if state.get("node_durations_ms"):
+        timing_table = Table(title="Execution Timing (ms)")
+        timing_table.add_column("Node", style="cyan")
+        timing_table.add_column("Duration", justify="right", style="green")
+        
+        for node, duration_ms in sorted(state["node_durations_ms"].items()):
+            timing_table.add_row(node, f"{duration_ms:.1f}")
+        
+        total_duration = sum(state["node_durations_ms"].values())
+        timing_table.add_row("[bold]Total[/bold]", f"[bold]{total_duration:.1f}[/bold]")
+        console.print(timing_table)
     
     # Token usage
     if state.get("token_counts"):
         tokens_table = Table(title="Token Usage")
-        tokens_table.add_column("Node", style="cyan")
+        tokens_table.add_column("Component", style="cyan")
         tokens_table.add_column("Tokens", justify="right", style="green")
         
-        for node, tokens in state["token_counts"].items():
+        for node, tokens in sorted(state["token_counts"].items()):
             tokens_table.add_row(node, str(tokens))
         
         total_tokens = sum(state["token_counts"].values())
@@ -136,12 +185,13 @@ def save_execution_summary(state: FailBotState, output_dir: str = "runs") -> str
         "test_confidence": state.get("test_confidence"),
         "issue_filed": bool(state.get("github_issue_url")),
         "github_issue_url": state.get("github_issue_url"),
-        "fallback_used": bool(state.get("fallback_issue_path")),
+        "agent_fallback_used": state.get("agent_fallback_used", False),
+        "issue_fallback_used": state.get("issue_fallback_used", False),
         "error_count": len(state.get("errors", [])),
         "token_counts": state.get("token_counts", {}),
         "total_tokens": sum(state.get("token_counts", {}).values()),
-        "execution_time_ms": state.get("execution_time_ms", 0),
-        "skipped_nodes": state.get("skipped_nodes", []),
+        "node_durations_ms": state.get("node_durations_ms", {}),
+        "total_duration_ms": sum(state.get("node_durations_ms", {}).values()),
         "errors": state.get("errors", [])
     }
     
@@ -152,7 +202,7 @@ def save_execution_summary(state: FailBotState, output_dir: str = "runs") -> str
     return str(file_path)
 
 
-async def report_node(state: FailBotState) -> dict[str, Any]:
+async def report_node(state: FailBotState) -> FailBotState:
     """
     Report node: Generate final summary and save results.
     

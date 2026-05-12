@@ -141,7 +141,10 @@ def async_retry(
                     await asyncio.sleep(delay)
             
             # Should not reach here, but just in case
-            raise RetryError(max_attempts, last_exception)
+            if last_exception is not None:
+                raise RetryError(max_attempts, last_exception)
+            else:
+                raise RetryError(max_attempts, RuntimeError("Unknown error after retries"))
         
         return wrapper
     return decorator
@@ -209,7 +212,10 @@ def sync_retry(
                         func
                     ) else __import__("time").sleep(delay)
             
-            raise RetryError(max_attempts, last_exception)
+            if last_exception is not None:
+                raise RetryError(max_attempts, last_exception)
+            else:
+                raise RetryError(max_attempts, RuntimeError("Unknown error after retries"))
         
         return wrapper
     return decorator
@@ -219,12 +225,16 @@ def sync_retry(
 if __name__ == "__main__":
     import asyncio
     
+    # Use a class to track attempts instead of function attributes
+    class TestOperation:
+        attempt_count: int = 0
+    
     @async_retry(max_attempts=3, initial_delay=0.1, max_delay=0.5)
     async def test_flaky_operation():
         """Simulate a flaky operation that fails twice then succeeds."""
         global attempt_count
-        attempt_count = getattr(test_flaky_operation, 'attempt_count', 0) + 1
-        test_flaky_operation.attempt_count = attempt_count
+        TestOperation.attempt_count = getattr(TestOperation, 'attempt_count', 0) + 1
+        attempt_count = TestOperation.attempt_count
         
         if attempt_count < 3:
             raise ConnectionError("Network error")

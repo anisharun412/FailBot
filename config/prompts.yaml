@@ -43,11 +43,22 @@ prompts:
       
       Output a JSON object with these exact keys:
       - summary: A 2-3 sentence description of what the build was doing and why it failed
-      - error_signature: The exact 3-5 lines from the log that indicate the root cause
+      - error_signature: A single string with the exact 1-5 lines from the log; join multiple lines with newline
       - files_changed: List of files mentioned in the log (if any)
-      - language: Programming language detected (e.g., "python", "javascript", "go")
+      - language: Programming language detected (e.g., python, javascript, go)
       
-      Be precise and concise. Extract the actual error lines verbatim.
+      CRITICAL REQUIREMENTS:
+      - Return ONLY valid JSON. No other text.
+      - Do NOT use thinking blocks, reasoning, or explanations.
+      - Do NOT wrap in markdown code blocks.
+      - Start response with opening brace and end with closing brace
+      - Do NOT include any text before or after the JSON object.
+    parse_log: |
+      CI log text:
+      {log_text}
+      
+      Extract the failure summary, error signature, files changed, and language.
+      Return valid JSON only.
     
     retry_on_parse_fail: |
       The previous output was not valid JSON. Ensure your response is valid JSON with these exact keys:
@@ -64,25 +75,39 @@ prompts:
       You are a CI failure triage expert with 5+ years of experience classifying build failures.
       
       Your task: Classify a CI failure into one of these categories:
-      - "code_bug": The failure is due to a bug in the code (test failure, runtime error, etc.)
-      - "flaky": The failure is intermittent/flaky (race condition, timing issue)
-      - "infra": The failure is due to infrastructure (network, disk space, missing dependency)
-      - "unknown": The failure category cannot be determined
+      - code_bug: The failure is due to a bug in the code (test failure, runtime error, etc.)
+      - flaky: The failure is intermittent or flaky (race condition, timing issue)
+      - infra: The failure is due to infrastructure (network, disk space, missing dependency)
+      - unknown: The failure category cannot be determined
       
-      Assign severity: "low", "medium", "high", "critical"
-      
-      Use the lookup_error_patterns tool to check against known error patterns. If a match is found,
-      use its category/severity as a hint.
+      Assign severity: low, medium, high, or critical
       
       Output a JSON object with:
-      - category: one of the four categories above
-      - severity: one of the four severity levels above
+      - failure_category: one of code_bug, flaky, infra, or unknown
+      - severity: one of low, medium, high, or critical
       - reasoning: 2-3 sentences explaining the classification
       - confidence: 0.0-1.0 confidence score
+      - is_flaky_indicator: boolean
+      - is_infra_indicator: boolean
+      
+      CRITICAL REQUIREMENTS:
+      - Return ONLY valid JSON. No other text.
+      - Do NOT use thinking blocks, reasoning explanations, or analysis text.
+      - Do NOT wrap in markdown code blocks.
+      - Start response with opening brace and end with closing brace
+      - Do NOT include any text before or after the JSON object.
+    classify: |
+      Error signature:
+      {error_signature}
+      
+      Additional context:
+      {error_context}
+      
+      Classify the failure and return valid JSON only.
     
     retry_on_parse_fail: |
       The previous output was not valid JSON. Output valid JSON with these exact keys:
-      - category: one of ["code_bug", "flaky", "infra", "unknown"]
+      - failure_category: one of ["code_bug", "flaky", "infra", "unknown"]
       - severity: one of ["low", "medium", "high", "critical"]
       - reasoning: string
       - confidence: number between 0.0 and 1.0
@@ -107,6 +132,10 @@ prompts:
       - language: Confirm the language (e.g., "python")
       - imports_needed: List of import statements needed
       - confidence: Float between 0.0 and 1.0 for how likely this catches the bug
+      
+      IMPORTANT: Return ONLY valid JSON. Do not wrap in markdown code blocks.
+      Start your response with an opening brace and end with closing brace.
+      No explanatory text before or after.
     
     suggest_test: |
       Error signature: {error_signature}
@@ -182,6 +211,8 @@ prompts:
       2. Include the error signature and failure category
       3. Reference the suggested test or remediation strategy
       4. Be well-formatted with markdown
+      
+      You must call the create_github_issue tool. Do not respond with plain text.
     
     format_issue_body: |
       ## Summary

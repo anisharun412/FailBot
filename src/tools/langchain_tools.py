@@ -8,7 +8,7 @@ Tools are automatically bound to language models for agent usage.
 from langchain_core.tools import tool
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from src.config import get_config
 from src.tools.code_validator import CodeValidator
@@ -230,7 +230,7 @@ FAILBOT_TOOLS = [
 ]
 
 
-def get_bound_model(model):
+def get_bound_model(model, tool_choice: Optional[Any] = None):
     """
     Bind all FailBot tools to a language model.
     
@@ -240,4 +240,6 @@ def get_bound_model(model):
     Returns:
         Model with tools bound
     """
+    if tool_choice is not None:
+        return model.bind_tools(FAILBOT_TOOLS, tool_choice=tool_choice)
     return model.bind_tools(FAILBOT_TOOLS)

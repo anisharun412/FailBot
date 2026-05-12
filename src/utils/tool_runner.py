@@ -69,7 +69,9 @@ def parse_tool_message(tool_message: ToolMessage) -> dict:
         return content
     if not content:
         return {}
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        return {"raw": content}
+    if isinstance(content, str):
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return {"raw": content}
+    return {"raw": str(content)}

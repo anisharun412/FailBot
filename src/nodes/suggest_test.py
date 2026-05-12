@@ -1,15 +1,19 @@
 """Suggest test node: Generate regression tests for code bugs."""
 
+import json
 import logging
 from typing import Any, Optional
 
-from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from pydantic import BaseModel, Field, ValidationError
 
 from src.config import get_config
 from src.state import FailBotState
 from src.tools.code_validator import CodeValidator, validate_code
 from src.utils.graph_utils import handle_node_error, log_node_end, log_node_start
+from src.utils.json_extractor import extract_json_from_response
+from src.utils.llm_factory import get_chat_model
 from src.utils.logging_config import log_event
 from src.utils.prompt_templates import render_agent_prompt
 from src.utils.retry import async_retry
@@ -46,7 +50,7 @@ async def call_test_suggester_agent(
     error_signature: str,
     language: str,
     error_context: str,
-    model: ChatOpenAI,
+    model: BaseChatModel,
     config: Any
 ) -> TestSuggesterOutput:
     """
@@ -56,7 +60,7 @@ async def call_test_suggester_agent(
         error_signature: Error to generate test for
         language: Programming language for the test
         error_context: Additional context
-        model: ChatOpenAI model instance
+        model: Chat model instance
         config: Configuration with prompts
         
     Returns:
@@ -65,30 +69,51 @@ async def call_test_suggester_agent(
     Raises:
         Exception: If LLM call fails
     """
-    system_prompt = render_agent_prompt(
+    system_prompt: str = render_agent_prompt(
         "test_suggester", "system",
         language=language
     )
-    user_prompt = render_agent_prompt(
+    user_prompt: str = render_agent_prompt(
         "test_suggester", "suggest_test",
         error_signature=error_signature,
         language=language,
         error_context=error_context
     )
     
-    # Call LLM with structured output
-    parser = model.with_structured_output(TestSuggesterOutput)
-    response = await parser.ainvoke(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-    )
+    # Call LLM and parse JSON response
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt)
+    ]
+    response = await model.ainvoke(messages)
     
-    return response
+    # Extract and parse JSON from response content
+    content: str | list[str | dict[str, Any]] = response.content
+    if isinstance(content, list):
+        # Handle tool calls in response
+        for item in content:
+            if isinstance(item, str):
+                content = item
+                break
+        else:
+            if isinstance(content, list) and content:
+                content = str(content[0])
+            else:
+                raise ValueError("No parseable content in LLM response")
+    
+    if not isinstance(content, str):
+        content = str(content)
+    
+    # Extract JSON from response (handles markdown code blocks and bare JSON)
+    try:
+        parsed_dict = extract_json_from_response(content)
+        return TestSuggesterOutput.model_validate(parsed_dict)
+    except (ValueError, json.JSONDecodeError) as e:
+        logger.warning(f"JSON extraction failed: {e}")
+        raise
 
 
-async def suggest_test_node(state: FailBotState) -> dict[str, Any]:
+async def suggest_test_node(state: FailBotState) -> FailBotState:
     """
     Suggest test node: Generate regression test for code bugs.
     
@@ -99,10 +124,11 @@ async def suggest_test_node(state: FailBotState) -> dict[str, Any]:
         state: FailBotState with error_signature, language, files_changed
         
     Returns:
-        Updated state dict with:
+        Updated FailBotState with:
         - suggested_test: Generated test code
         - test_language: Language of the test
         - test_validation_errors: Any validation issues found
+        - test_confidence: Confidence score for the test
         - token_counts: Updated with test suggester tokens
         - status: Updated to 'suggest_test_complete'
         - errors: Appended with any errors
@@ -115,38 +141,48 @@ async def suggest_test_node(state: FailBotState) -> dict[str, Any]:
         config = get_config()
         
         # Check prerequisites
-        if not state.get("error_signature"):
+        error_sig: Optional[str] = state.get("error_signature")
+        if not error_sig:
             raise ValueError("Error signature not available")
         
-        if not state.get("language"):
+        lang: Optional[str] = state.get("language")
+        if not lang:
             logger.warning("Language not detected, defaulting to 'unknown'")
-            state["language"] = "unknown"
+            lang = "unknown"
         
         log_event(
             logger, state["run_id"], "suggest_test",
             "test_generation_start",
-            {"language": state["language"], "error_sig": state["error_signature"][:80]}
+            {"language": lang, "error_sig": error_sig[:80]}
         )
         
-        # Build context
+        # Build context - safely handle None values
+        files_changed: Optional[list[str]] = state.get('files_changed')
+        log_text: Optional[str] = state.get('log_text')
+        files_str = ', '.join(files_changed[:3]) if files_changed else "unknown"
+        log_preview = (log_text[:300] if log_text else "no log text")
+        
         error_context = f"""
-Error signature: {state.get('error_signature')}
-Files affected: {', '.join(state.get('files_changed', [])[:3])}
-Log preview: {state.get('log_text', '')[:300]}
+Error signature: {error_sig}
+Files affected: {files_str}
+Log preview: {log_preview}
 """
         
-        # Initialize LLM
-        model = ChatOpenAI(
-            model=config.get_model("test_suggester"),
+        # Initialize LLM with JSON Object Mode (per official Groq/OpenAI docs)
+        model = get_chat_model(
+            role="test_suggester",
             temperature=0.3,
-            max_tokens=1500
+            max_tokens=2000,
+            json_object_mode=True,
         )
         
         # Generate test
+        test_result: TestSuggesterOutput
+        generation_success: bool
         try:
             test_result = await call_test_suggester_agent(
-                state["error_signature"],
-                state["language"],
+                error_sig,
+                lang,
                 error_context,
                 model,
                 config
@@ -155,8 +191,6 @@ Log preview: {state.get('log_text', '')[:300]}
         except Exception as llm_error:
             logger.error(f"Test generation failed: {llm_error}")
             
-            if "errors" not in state or state["errors"] is None:
-                state["errors"] = []
             state["errors"].append({
                 "node": "suggest_test",
                 "error": f"Test generation failed: {str(llm_error)}",
@@ -167,26 +201,32 @@ Log preview: {state.get('log_text', '')[:300]}
             test_result = TestSuggesterOutput(
                 test_code="# Test generation failed\n# Please review log manually",
                 test_description="Test generation failed - manual review needed",
-                language=state["language"],
+                language=lang,
                 imports_needed=[],
                 confidence=0.0
             )
             generation_success = False
         
         # Validate code and detect hallucinations
-        validation_result = CodeValidator.validate_and_score(
+        validation_result: dict[str, Any] = CodeValidator.validate_and_score(
             test_result.test_code,
             language=test_result.language
         )
         
-        validation_errors = []
-        if validation_result["syntax_error"]:
-            validation_errors.append(f"Syntax error: {validation_result['syntax_error']}")
-        validation_errors.extend(validation_result["hallucinations"])
-        validation_errors.extend(validation_result["warnings"])
+        validation_errors: list[str] = []
+        syntax_error: Optional[str] = validation_result.get("syntax_error")
+        if syntax_error:
+            validation_errors.append(f"Syntax error: {syntax_error}")
+        
+        hallucinations: list[str] = validation_result.get("hallucinations", [])
+        validation_errors.extend(hallucinations)
+        
+        warnings: list[str] = validation_result.get("warnings", [])
+        validation_errors.extend(warnings)
         
         # Adjust confidence based on validation issues
-        test_confidence = test_result.confidence * (1.0 - validation_result["confidence_penalty"])
+        confidence_penalty: float = validation_result.get("confidence_penalty", 0.0)
+        test_confidence: float = test_result.confidence * (1.0 - confidence_penalty)
         
         log_event(
             logger, state["run_id"], "suggest_test",
@@ -194,7 +234,7 @@ Log preview: {state.get('log_text', '')[:300]}
             {
                 "language": test_result.language,
                 "success": generation_success,
-                "valid": validation_result["is_valid"],
+                "valid": validation_result.get("is_valid", False),
                 "validation_errors": len(validation_errors),
                 "confidence": test_confidence
             }
@@ -209,11 +249,10 @@ Log preview: {state.get('log_text', '')[:300]}
         
         # Track tokens
         token_counter = TokenCounter("gpt-4o-mini")
-        test_tokens = token_counter.count_tokens(test_result.test_code)
+        test_tokens: int = token_counter.count_tokens(test_result.test_code)
+        input_tokens: int = token_counter.count_tokens(error_context)
         
-        if "token_counts" not in state or state["token_counts"] is None:
-            state["token_counts"] = {}
-        state["token_counts"]["suggest_test_input"] = token_counter.count_tokens(error_context)
+        state["token_counts"]["suggest_test_input"] = input_tokens
         state["token_counts"]["suggest_test_output"] = test_tokens
         
         state["status"] = "suggest_test_complete"
@@ -226,8 +265,6 @@ Log preview: {state.get('log_text', '')[:300]}
         error_msg = f"Suggest test node failed: {str(e)}"
         logger.error(error_msg, exc_info=True)
         
-        if "errors" not in state or state["errors"] is None:
-            state["errors"] = []
         state["errors"].append({
             "node": "suggest_test",
             "error": str(e),

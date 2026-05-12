@@ -33,15 +33,25 @@ class FailBotJsonFormatter(logging.Formatter):
         
         # Add extra fields if present
         if hasattr(record, "run_id"):
-            log_data["run_id"] = record.run_id
+            run_id_val: Any = getattr(record, "run_id", None)
+            if run_id_val is not None:
+                log_data["run_id"] = run_id_val
         if hasattr(record, "node"):
-            log_data["node"] = record.node
+            node_val: Any = getattr(record, "node", None)
+            if node_val is not None:
+                log_data["node"] = node_val
         if hasattr(record, "event_type"):
-            log_data["event_type"] = record.event_type
+            event_type_val: Any = getattr(record, "event_type", None)
+            if event_type_val is not None:
+                log_data["event_type"] = event_type_val
         if hasattr(record, "data"):
-            log_data["data"] = record.data
+            data_val: Any = getattr(record, "data", None)
+            if data_val is not None:
+                log_data["data"] = data_val
         if hasattr(record, "duration_ms"):
-            log_data["duration_ms"] = record.duration_ms
+            duration_val: Any = getattr(record, "duration_ms", None)
+            if duration_val is not None:
+                log_data["duration_ms"] = duration_val
         
         # Add exception if present
         if record.exc_info:
@@ -89,11 +99,8 @@ def setup_json_logging(
     file_handler = logging.FileHandler(log_file, mode='w')
     file_handler.setLevel(level)
     
-    # Use python-json-logger if available
-    if jsonlogger:
-        formatter = jsonlogger.JsonFormatter()
-    else:
-        formatter = FailBotJsonFormatter()
+    # Use custom JSON formatter
+    formatter = FailBotJsonFormatter()
     
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -108,7 +115,6 @@ def setup_json_logging(
     logger.addHandler(console_handler)
     
     logger.info(f"Logging initialized to {log_file}")
-    logger.extra_run_id = run_id
     
     return logger
 

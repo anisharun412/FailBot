@@ -110,7 +110,7 @@ class FailBotEventLogger(BaseCallbackHandler):
     
     def on_llm_error(
         self,
-        error: Union[Exception, KeyboardInterrupt],
+        error: BaseException,
         **kwargs: Any
     ) -> None:
         """Called when an LLM call errors."""
@@ -190,12 +190,26 @@ class FailBotEventLogger(BaseCallbackHandler):
             exc_info=None
         )
         
+        output_length = 0
+        if isinstance(output, str):
+            output_length = len(output)
+        elif hasattr(output, "content"):
+            try:
+                output_length = len(output.content)
+            except TypeError:
+                output_length = len(str(output.content))
+        else:
+            try:
+                output_length = len(output)
+            except TypeError:
+                output_length = len(str(output))
+
         record.run_id = self.run_id
         record.node = node_name
         record.event_type = "tool_end"
         record.duration_ms = duration_ms
         record.data = {
-            "output_length": len(output),
+            "output_length": output_length,
             "success": True,
         }
         
@@ -203,7 +217,7 @@ class FailBotEventLogger(BaseCallbackHandler):
     
     def on_tool_error(
         self,
-        error: Union[Exception, KeyboardInterrupt],
+        error: BaseException,
         **kwargs: Any
     ) -> None:
         """Called when a tool errors."""

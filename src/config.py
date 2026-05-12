@@ -10,6 +10,11 @@ from typing import Any, Dict, Optional
 from dataclasses import dataclass, field
 import yaml
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
 
 @dataclass
 class FailBotConfig:
@@ -99,12 +104,22 @@ def load_config(config_path: Optional[str] = None) -> FailBotConfig:
         yaml.YAMLError: If YAML is malformed
     """
     
+    if load_dotenv is not None:
+        env_path = Path.cwd() / ".env"
+        if not env_path.exists():
+            env_path = Path(__file__).resolve().parent.parent / ".env"
+        if env_path.exists():
+            load_dotenv(dotenv_path=env_path)
+
     # Determine config path
-    if config_path is None:
+    resolved_path: Optional[str] = config_path
+    if resolved_path is None:
         # Check environment variable
-        config_path = os.getenv("FAILBOT_CONFIG")
+        env_config = os.getenv("FAILBOT_CONFIG")
+        if env_config is not None:
+            resolved_path = env_config
         
-        if config_path is None:
+        if resolved_path is None:
             # Search in common locations
             for potential_path in [
                 Path("config/prompts.yaml"),
@@ -112,36 +127,45 @@ def load_config(config_path: Optional[str] = None) -> FailBotConfig:
                 Path(__file__).parent / ".." / ".." / "config" / "prompts.yaml",
             ]:
                 if potential_path.exists():
-                    config_path = str(potential_path)
+                    resolved_path = str(potential_path)
                     break
             
-            if config_path is None:
+            if resolved_path is None:
                 raise FileNotFoundError(
                     "config/prompts.yaml not found. Set FAILBOT_CONFIG env var or place file in config/ directory"
                 )
     
-    config_path = Path(config_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+    # At this point, resolved_path is guaranteed to be a string
+    config_path_obj: Path = Path(resolved_path)
+    if not config_path_obj.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path_obj}")
     
     # Load YAML
-    with open(config_path, 'r') as f:
-        data = yaml.safe_load(f)
-    
-    if data is None:
-        data = {}
+    with open(config_path_obj, 'r') as f:
+        data: Dict[str, Any] = yaml.safe_load(f) or {}
     
     # Override with environment variables
-    models = data.get("models", {})
-    if os.getenv("FAILBOT_PARSER_MODEL"):
-        models["parser"] = os.getenv("FAILBOT_PARSER_MODEL")
-    if os.getenv("FAILBOT_TRIAGE_MODEL"):
-        models["triage"] = os.getenv("FAILBOT_TRIAGE_MODEL")
-    if os.getenv("FAILBOT_TEST_MODEL"):
-        models["test_suggester"] = os.getenv("FAILBOT_TEST_MODEL")
+    models: Dict[str, str] = data.get("models", {})
     
-    if os.getenv("FAILBOT_TEMPERATURE"):
-        data["temperature"] = float(os.getenv("FAILBOT_TEMPERATURE"))
+    parser_model = os.getenv("FAILBOT_PARSER_MODEL") or os.getenv("PARSER_MODEL") or os.getenv("MODEL_NAME")
+    if parser_model is not None:
+        models["parser"] = parser_model
+
+    triage_model = os.getenv("FAILBOT_TRIAGE_MODEL") or os.getenv("TRIAGE_MODEL") or os.getenv("MODEL_NAME")
+    if triage_model is not None:
+        models["triage"] = triage_model
+
+    test_model = os.getenv("FAILBOT_TEST_MODEL") or os.getenv("TEST_MODEL") or os.getenv("MODEL_NAME")
+    if test_model is not None:
+        models["test_suggester"] = test_model
+
+    temp_env = os.getenv("FAILBOT_TEMPERATURE") or os.getenv("TEMPERATURE")
+    if temp_env is not None:
+        data["temperature"] = float(temp_env)
+
+    max_tokens_env = os.getenv("FAILBOT_MAX_TOKENS_PER_CALL") or os.getenv("MAX_TOKENS_PER_CALL")
+    if max_tokens_env is not None:
+        data["max_tokens_per_call"] = int(max_tokens_env)
     
     # Create config object
     config = FailBotConfig(
@@ -154,7 +178,7 @@ def load_config(config_path: Optional[str] = None) -> FailBotConfig:
         prompts=data.get("prompts", {}),
         error_messages=data.get("error_messages", {}),
         logging=data.get("logging", {}),
-        _config_path=config_path,
+        _config_path=config_path_obj,
     )
     
     # Validate required fields

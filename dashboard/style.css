@@ -1,0 +1,396 @@
+/* FailBot Dashboard - Global Styles (forced dark, browser-agnostic) */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons|Material+Icons+Sharp|Material+Icons+Outlined|Material+Icons+Round');
+
+/* ── Force dark on every surface including light-mode browsers ──────── */
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stApp"],
+[data-testid="stHeader"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stBottom"],
+.main, .block-container,
+div[data-testid="stVerticalBlock"],
+div[data-testid="stHorizontalBlock"],
+div.stTabs, div[role="tablist"],
+[class*="css"] {
+    background-color: #111827 !important;
+    color: #f9fafb !important;
+}
+
+/* ── Sidebar – unified background on every layer ───────────────────── */
+/* Outer shell (the section element itself) */
+section[data-testid="stSidebar"] {
+    background-color: #111827 !important;
+    border-right: 1px solid #374151 !important;
+}
+/* Inner content wrapper */
+[data-testid="stSidebar"] > div:first-child {
+    background-color: #111827 !important;
+    border-right: none !important;
+}
+/* The collapse toggle button rail on the very left edge */
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebarCollapseButton"],
+button[kind="header"],
+[data-testid="stSidebar"] + div {
+    background-color: #111827 !important;
+}
+/* Catch any residual white/light child divs inside sidebar */
+[data-testid="stSidebar"] * {
+    background-color: transparent;
+}
+/* Re-apply to the direct children that should have the panel bg */
+[data-testid="stSidebar"] > div {
+    background-color: #111827 !important;
+}
+
+/* Main content area */
+[data-testid="stAppViewContainer"] > section.main {
+    background-color: #111827 !important;
+}
+.block-container {
+    background-color: #111827 !important;
+    padding-top: 2rem !important;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────── */
+/* Set default font, but exclude any element whose class contains "material" or "icon" */
+h1, h2, h3, h4, h5, h6, p, li, label,
+div:not([class*="material"]):not([class*="icon"]),
+span:not([class*="material"]):not([class*="icon"]):not([data-testid="stIconMaterial"]) {
+    color: #f9fafb !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* Preserve Material Fonts for all icon variants */
+[class*="material"], [class*="icon"], [data-testid="stIconMaterial"] {
+    font-family: 'Material Symbols Rounded', 'Material Icons Sharp', 'Material Icons', sans-serif !important;
+    font-weight: normal !important;
+    font-style: normal !important;
+    font-size: 24px !important;
+    display: inline-block !important;
+    line-height: 1 !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+    word-wrap: normal !important;
+    white-space: nowrap !important;
+    direction: ltr !important;
+    -webkit-font-smoothing: antialiased !important;
+    -moz-osx-font-smoothing: grayscale !important;
+}
+
+/* ── Metric Cards ──────────────────────────────────────────────────── */
+[data-testid="stMetric"] {
+    background: #1f2937 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 12px !important;
+    padding: 18px 22px !important;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+[data-testid="stMetric"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+[data-testid="stMetricLabel"] > div {
+    color: #d1d5db !important;
+    font-size: 0.72rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    font-weight: 600 !important;
+}
+[data-testid="stMetricValue"] > div {
+    color: #f9fafb !important;
+    font-size: 1.9rem !important;
+    font-weight: 700 !important;
+}
+
+/* ── Sidebar nav ────────────────────────────────────────────────────── */
+[data-testid="stSidebar"] .stRadio label {
+    color: #d1d5db !important;
+    font-size: 0.72rem !important;
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label {
+    background: transparent !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    margin: 2px 0 !important;
+    color: #f9fafb !important;
+    font-weight: 500 !important;
+    transition: background 0.15s !important;
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+    background: #4b5563 !important;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+.stButton > button {
+    background: linear-gradient(135deg, #064e3b, #065f46) !important;
+    color: #f9fafb !important;
+    border: 1px solid #10b981 !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    transition: all 0.2s !important;
+    font-family: 'Inter', sans-serif !important;
+}
+.stButton > button:hover {
+    background: #10b981 !important;
+    color: #000 !important;
+    box-shadow: 0 0 16px rgba(16,185,129,0.4) !important;
+}
+
+/* Primary button variant (for Run button) */
+.stButton > button[kind="primary"] {
+    background: #10b981 !important;
+    color: #111827 !important;
+    border: none !important;
+    font-weight: 700 !important;
+}
+.stButton > button[kind="primary"]:hover {
+    background: #34d399 !important;
+    box-shadow: 0 0 20px rgba(16,185,129,0.5) !important;
+}
+
+/* ── Inputs / Textareas / Selectboxes ──────────────────────────────── */
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stSelectbox"] > div > div,
+[data-testid="stFileUploader"] {
+    background: #1f2937 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 8px !important;
+    color: #f9fafb !important;
+    font-family: 'Inter', sans-serif !important;
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus {
+    border-color: #10b981 !important;
+    box-shadow: 0 0 0 2px rgba(16,185,129,0.2) !important;
+    outline: none !important;
+}
+[data-testid="stTextInput"] label,
+[data-testid="stTextArea"] label,
+[data-testid="stSelectbox"] label,
+[data-testid="stFileUploader"] label {
+    color: #d1d5db !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+}
+
+/* ── File Uploader ──────────────────────────────────────────────────── */
+[data-testid="stFileUploader"] > div {
+    background: #1f2937 !important;
+    border: 2px dashed #374151 !important;
+    border-radius: 10px !important;
+    transition: border-color 0.2s !important;
+}
+[data-testid="stFileUploader"] > div:hover {
+    border-color: #10b981 !important;
+}
+[data-testid="stFileUploadDropzone"] {
+    background: #1f2937 !important;
+}
+
+/* ── Checkboxes / Toggles ───────────────────────────────────────────── */
+[data-testid="stCheckbox"] label {
+    color: #f9fafb !important;
+}
+
+/* ── Tabs ───────────────────────────────────────────────────────────── */
+[data-testid="stTabs"] [role="tablist"] {
+    background: #1f2937 !important;
+    border-radius: 10px 10px 0 0 !important;
+    border-bottom: 1px solid #374151 !important;
+}
+[data-testid="stTabs"] button[role="tab"] {
+    background: transparent !important;
+    color: #d1d5db !important;
+    border: none !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 500 !important;
+    padding: 10px 18px !important;
+    transition: color 0.15s !important;
+}
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+    color: #10b981 !important;
+    border-bottom: 2px solid #10b981 !important;
+    background: transparent !important;
+}
+[data-testid="stTabs"] [role="tabpanel"] {
+    background: #111827 !important;
+    border: 1px solid #374151 !important;
+    border-top: none !important;
+    border-radius: 0 0 10px 10px !important;
+    padding: 16px !important;
+}
+
+/* ── DataFrames / Tables ───────────────────────────────────────────── */
+[data-testid="stDataFrame"],
+[data-testid="stDataFrameContainer"],
+.dataframe-container {
+    background: #1f2937 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 12px !important;
+    overflow: hidden;
+}
+[data-testid="stDataFrame"] th {
+    background: #111827 !important;
+    color: #d1d5db !important;
+    font-size: 0.74rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid #374151 !important;
+}
+[data-testid="stDataFrame"] td {
+    background: #1f2937 !important;
+    color: #f9fafb !important;
+    border-bottom: 1px solid #4b5563 !important;
+    font-size: 0.85rem !important;
+}
+[data-testid="stDataFrame"] tr:hover td {
+    background: #4b5563 !important;
+}
+
+/* ── Expanders ──────────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    background: #1f2937 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 12px !important;
+    margin-bottom: 8px !important;
+    overflow: hidden;
+}
+/* Summary row: flex layout so the toggle icon never overlaps the title */
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] > details > summary,
+[data-testid="stExpander"] [data-testid="stExpanderToggleIcon"] {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    flex-direction: row !important;
+    color: #f9fafb !important;
+    font-weight: 600 !important;
+    font-size: 0.9rem !important;
+    padding: 14px 18px !important;
+    cursor: pointer !important;
+    user-select: none !important;
+    background: #1f2937 !important;
+    position: relative !important;  /* stop absolute children from escaping */
+}
+[data-testid="stExpander"] summary:hover,
+[data-testid="stExpander"] > details > summary:hover {
+    background: #4b5563 !important;
+}
+/* The arrow svg icon — keep it to the left in its own box */
+[data-testid="stExpander"] summary svg,
+[data-testid="stExpander"] > details > summary svg {
+    flex-shrink: 0 !important;
+    min-width: 16px !important;
+    width: 16px !important;
+    height: 16px !important;
+    color: #d1d5db !important;
+    fill: #d1d5db !important;
+    margin-right: 2px !important;
+    /* prevent the SVG from overlapping text by disabling absolute positioning */
+    position: static !important;
+}
+
+/* ── Code blocks ────────────────────────────────────────────────────── */
+code, pre, .stCodeBlock {
+    font-family: 'JetBrains Mono', monospace !important;
+    background: #1f2937 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 8px !important;
+    color: #6ee7b7 !important;
+}
+
+/* ── Alerts / Info boxes ────────────────────────────────────────────── */
+[data-testid="stAlert"] {
+    background: #1f2937 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 10px !important;
+    color: #f9fafb !important;
+}
+
+/* ── Progress bar ───────────────────────────────────────────────────── */
+[data-testid="stProgressBar"] > div > div {
+    background: linear-gradient(90deg, #1e3a5f, #10b981) !important;
+    border-radius: 4px !important;
+}
+
+/* ── Spinner ────────────────────────────────────────────────────────── */
+[data-testid="stSpinner"] {
+    color: #10b981 !important;
+}
+
+/* ── Dividers ───────────────────────────────────────────────────────── */
+hr {
+    border-color: #374151 !important;
+    margin: 18px 0 !important;
+}
+
+/* ── Plotly charts (transparent bg) ────────────────────────────────── */
+.js-plotly-plot .plotly .bg { fill: transparent !important; }
+.js-plotly-plot .plotly { background: transparent !important; }
+
+/* ── Scrollbar ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #1f2937; }
+::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #10b981; }
+
+/* ── Custom FailBot card ────────────────────────────────────────────── */
+.fb-card {
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 14px;
+    transition: box-shadow 0.15s, border-color 0.15s;
+}
+.fb-card:hover {
+    border-color: #10b981;
+    box-shadow: 0 0 0 1px rgba(16,185,129,0.2);
+}
+
+/* ── Status log area ────────────────────────────────────────────────── */
+.log-area {
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 10px;
+    padding: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    color: #3fb950;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* ── Step indicator ─────────────────────────────────────────────────── */
+.step-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #4b5563;
+}
+.step-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-top: 4px;
+    flex-shrink: 0;
+}
+.dot-done    { background: #3fb950; box-shadow: 0 0 8px rgba(63,185,80,0.4); }
+.dot-running { background: #e3b341; box-shadow: 0 0 8px rgba(227,179,65,0.5);
+               animation: pulse 1s infinite; }
+.dot-waiting { background: #374151; }
+.dot-error   { background: #f85149; box-shadow: 0 0 8px rgba(248,81,73,0.4); }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.5; transform: scale(0.85); }
+}

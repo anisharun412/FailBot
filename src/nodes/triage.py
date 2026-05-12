@@ -4,13 +4,15 @@ import logging
 from typing import Any, Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, Field
 
 from src.config import get_config
 from src.state import FailBotState
 from src.tools.langchain_tools import get_bound_model
 from src.utils.graph_utils import handle_node_error, log_node_end, log_node_start
+from src.utils.json_extractor import extract_json_from_response
+from src.utils.llm_factory import get_chat_model
 from src.utils.logging_config import log_event
 from src.utils.prompt_templates import render_agent_prompt
 from src.utils.retry import async_retry
@@ -103,7 +105,7 @@ def apply_heuristics(
 async def call_triage_agent(
     error_signature: str,
     error_context: str,
-    model: ChatOpenAI,
+    model: BaseChatModel,
     config: Any
 ) -> TriageOutput:
     """
@@ -112,7 +114,7 @@ async def call_triage_agent(
     Args:
         error_signature: Error message to triage
         error_context: Additional context (files, language, etc.)
-        model: ChatOpenAI model instance
+        model: Chat model instance
         config: Configuration with prompts
         
     Returns:
@@ -121,6 +123,8 @@ async def call_triage_agent(
     Raises:
         Exception: If LLM call fails
     """
+    import json
+    
     system_prompt = render_agent_prompt("triage", "system")
     user_prompt = render_agent_prompt(
         "triage", "classify",
@@ -128,28 +132,40 @@ async def call_triage_agent(
         error_context=error_context
     )
     
-    bound_model = get_bound_model(model)
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_prompt),
     ]
 
-    first_response = await bound_model.ainvoke(messages)
-    tool_messages = await run_tool_calls(first_response)
-
-    if tool_messages:
-        tool_aware_messages = messages + [first_response] + tool_messages
-        parser = bound_model.with_structured_output(TriageOutput)
-        return await parser.ainvoke(tool_aware_messages)
-
+    response = await model.ainvoke(messages)
+    
+    # Extract content - handle both string and list responses
+    content: str | list[str | dict[str, Any]] = response.content
+    if isinstance(content, list):
+        # Handle tool calls or multiple content items
+        for item in content:
+            if isinstance(item, str):
+                content = item
+                break
+        else:
+            if isinstance(content, list) and content:
+                content = str(content[0])
+            else:
+                raise ValueError("No parseable content in LLM response")
+    
+    if not isinstance(content, str):
+        content = str(content)
+    
+    # Extract JSON from response (handles markdown code blocks and bare JSON)
     try:
-        return TriageOutput.model_validate_json(first_response.content)
-    except Exception:
-        parser = bound_model.with_structured_output(TriageOutput)
-        return await parser.ainvoke(messages)
+        parsed_dict = extract_json_from_response(content)
+        return TriageOutput.model_validate(parsed_dict)
+    except (ValueError, json.JSONDecodeError) as e:
+        logger.warning(f"JSON extraction failed: {e}")
+        raise
 
 
-async def triage_node(state: FailBotState) -> dict[str, Any]:
+async def triage_node(state: FailBotState) -> FailBotState:
     """
     Triage node: Classify failure into category and severity.
     
@@ -160,7 +176,7 @@ async def triage_node(state: FailBotState) -> dict[str, Any]:
         state: FailBotState with error_signature and parsed info
         
     Returns:
-        Updated state dict with:
+        Updated FailBotState with:
         - failure_category: One of code_bug, flaky, infra, unknown
         - severity: One of critical, high, medium, low
         - triage_confidence: Confidence score for classification
@@ -175,32 +191,41 @@ async def triage_node(state: FailBotState) -> dict[str, Any]:
         config = get_config()
         
         # Check that error_signature is available
-        if not state.get("error_signature"):
+        error_sig: Optional[str] = state.get("error_signature")
+        if not error_sig:
             raise ValueError("Error signature not available - parse_log node may have failed")
         
         log_event(
             logger, state["run_id"], "triage",
-            "triage_start", {"error_signature": state["error_signature"][:100]}
+            "triage_start", {"error_signature": error_sig[:100]}
         )
         
-        # Build context for triage
+        # Build context for triage - safely handle None values
+        lang: str = state.get('language') or 'unknown'
+        files_changed: list[str] = state.get('files_changed') or []
+        log_text: str = state.get('log_text') or ''
+        
+        files_str = ', '.join(files_changed[:3]) if files_changed else "unknown"
+        log_preview = log_text[:500] if log_text else "no log text"
+        
         error_context = f"""
-Language: {state.get('language', 'unknown')}
-Files: {', '.join(state.get('files_changed', [])[:3])}
-Log preview: {state.get('log_text', '')[:500]}
+Language: {lang}
+Files: {files_str}
+Log preview: {log_preview}
 """
         
-        # Initialize LLM
-        model = ChatOpenAI(
-            model=config.get_model("triage"),
+        # Initialize LLM with JSON Object Mode (per official Groq/OpenAI docs)
+        model = get_chat_model(
+            role="triage",
             temperature=0.0,
-            max_tokens=500
+            max_tokens=1000,
+            json_object_mode=True,
         )
         
         # Try LLM triage
         try:
             triage_result = await call_triage_agent(
-                state["error_signature"],
+                error_sig,
                 error_context,
                 model,
                 config
@@ -211,9 +236,9 @@ Log preview: {state.get('log_text', '')[:500]}
             
             # Fallback to heuristics
             category, conf = apply_heuristics(
-                state["error_signature"],
-                state.get("language", "unknown"),
-                state.get("files_changed", [])
+                error_sig,
+                lang,
+                files_changed
             )
             
             triage_result = TriageOutput(
@@ -226,8 +251,6 @@ Log preview: {state.get('log_text', '')[:500]}
             )
             heuristic_used = True
             
-            if "errors" not in state or state["errors"] is None:
-                state["errors"] = []
             state["errors"].append({
                 "node": "triage",
                 "error": f"LLM triage failed: {str(llm_error)}",
@@ -256,8 +279,6 @@ Log preview: {state.get('log_text', '')[:500]}
         token_counter = TokenCounter("gpt-4o-mini")
         triage_tokens = token_counter.count_tokens(error_context)
         
-        if "token_counts" not in state or state["token_counts"] is None:
-            state["token_counts"] = {}
         state["token_counts"]["triage_input"] = triage_tokens
         state["token_counts"]["triage_output"] = 200  # Estimate
         
@@ -271,8 +292,6 @@ Log preview: {state.get('log_text', '')[:500]}
         error_msg = f"Triage node failed: {str(e)}"
         logger.error(error_msg, exc_info=True)
         
-        if "errors" not in state or state["errors"] is None:
-            state["errors"] = []
         state["errors"].append({
             "node": "triage",
             "error": str(e),
